@@ -217,6 +217,10 @@ internal static class AggregationExpressionEvaluator
             //   "Returns the seconds from a timestamp as a long."
             "$tsSecond" => EvalTsSecond(doc, args, variables),
 
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/function/
+            //   "Defines a custom aggregation function or expression in JavaScript."
+            "$function" => EvalFunction(doc, args, variables),
+
             _ => throw new NotSupportedException($"Expression operator '{op}' is not supported.")
         };
     }
@@ -1154,6 +1158,72 @@ internal static class AggregationExpressionEvaluator
         var val = Evaluate(doc, args, variables);
         if (val.BsonType != BsonType.Timestamp) return BsonNull.Value;
         return new BsonInt64(val.AsBsonTimestamp.Timestamp);
+    }
+
+    #endregion
+
+    #region $function
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/function/
+    //   "Defines a custom aggregation function or expression in JavaScript."
+    //   "The body of the function is a string containing a JavaScript function."
+    // Note: Actual JavaScript execution requires the JsTriggers package.
+    private static Func<string, BsonArray, BsonValue>? _functionEvaluator;
+
+    /// <summary>
+    /// Registers a custom $function evaluator (typically from the JsTriggers package).
+    /// </summary>
+    internal static void RegisterFunctionEvaluator(Func<string, BsonArray, BsonValue> evaluator)
+    {
+        _functionEvaluator = evaluator;
+    }
+
+    private static BsonValue EvalFunction(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var spec = args.AsBsonDocument;
+        var body = spec["body"].AsString;
+        var fnArgs = spec.Contains("args") ? spec["args"].AsBsonArray : new BsonArray();
+
+        // Evaluate argument expressions against the current document
+        var evaluatedArgs = new BsonArray();
+        foreach (var arg in fnArgs)
+        {
+            evaluatedArgs.Add(Evaluate(doc, arg, variables));
+        }
+
+        if (_functionEvaluator != null)
+            return _functionEvaluator(body, evaluatedArgs);
+
+        throw new NotSupportedException(
+            "$function requires the MongoDB.InMemoryEmulator.JsTriggers package for JavaScript execution. " +
+            "Install the package and call JsExpressionSetup.Register() to enable $function support.");
+    }
+
+    #endregion
+
+    #region $accumulator (hook)
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/accumulator/
+    //   "Defines a custom accumulator function in JavaScript."
+    private static Func<BsonDocument, List<BsonDocument>, BsonDocument?, BsonValue>? _accumulatorEvaluator;
+
+    /// <summary>
+    /// Registers a custom $accumulator evaluator (typically from the JsTriggers package).
+    /// Takes (accSpec, groupDocs, variables) and returns the accumulated result.
+    /// </summary>
+    internal static void RegisterAccumulatorEvaluator(Func<BsonDocument, List<BsonDocument>, BsonDocument?, BsonValue> evaluator)
+    {
+        _accumulatorEvaluator = evaluator;
+    }
+
+    internal static BsonValue EvalAccumulator(BsonDocument accSpec, List<BsonDocument> groupDocs, BsonDocument? variables)
+    {
+        if (_accumulatorEvaluator != null)
+            return _accumulatorEvaluator(accSpec, groupDocs, variables);
+
+        throw new NotSupportedException(
+            "$accumulator requires the MongoDB.InMemoryEmulator.JsTriggers package for JavaScript execution. " +
+            "Install the package and call JsExpressionSetup.Register() to enable $accumulator support.");
     }
 
     #endregion

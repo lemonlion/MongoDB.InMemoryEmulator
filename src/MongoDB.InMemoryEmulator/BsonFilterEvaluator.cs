@@ -46,6 +46,15 @@ internal static class BsonFilterEvaluator
             "$expr" => AggregationExpressionEvaluator.IsTruthy(
                 AggregationExpressionEvaluator.Evaluate(document, element.Value, variables)),
 
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/jsonSchema/
+            //   "Matches documents that satisfy the specified JSON Schema."
+            "$jsonSchema" => MatchesJsonSchema(document, element.Value.AsBsonDocument),
+
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/where/
+            //   "Use the $where operator to pass either a string containing a JavaScript expression
+            //    or a full JavaScript function to the query system."
+            "$where" => EvaluateWhere(document, element.Value),
+
             // Field-level condition
             _ => MatchesField(document, element.Name, element.Value)
         };
@@ -566,4 +575,200 @@ internal static class BsonFilterEvaluator
 
         return (terms, phrases, negated);
     }
+
+    #region $jsonSchema
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/jsonSchema/
+    //   "The $jsonSchema operator matches documents that satisfy the specified JSON Schema."
+    private static bool MatchesJsonSchema(BsonDocument document, BsonDocument schema)
+    {
+        // Check 'required' — array of field names that must be present
+        if (schema.Contains("required") && schema["required"].IsBsonArray)
+        {
+            foreach (var field in schema["required"].AsBsonArray)
+            {
+                if (!document.Contains(field.AsString))
+                    return false;
+            }
+        }
+
+        // Check 'bsonType' — the document-level BSON type constraint
+        if (schema.Contains("bsonType"))
+        {
+            var expectedType = schema["bsonType"].AsString;
+            if (expectedType == "object" && document.BsonType != BsonType.Document)
+                return false;
+        }
+
+        // Check 'properties' — per-field schema constraints
+        if (schema.Contains("properties") && schema["properties"].IsBsonDocument)
+        {
+            foreach (var prop in schema["properties"].AsBsonDocument)
+            {
+                if (!document.Contains(prop.Name)) continue;
+                if (!MatchesPropertySchema(document[prop.Name], prop.Value.AsBsonDocument))
+                    return false;
+            }
+        }
+
+        // Check 'additionalProperties: false'
+        if (schema.Contains("additionalProperties") && schema["additionalProperties"] == false)
+        {
+            var allowedFields = new HashSet<string> { "_id" };
+            if (schema.Contains("properties"))
+            {
+                foreach (var prop in schema["properties"].AsBsonDocument)
+                    allowedFields.Add(prop.Name);
+            }
+            foreach (var field in document)
+            {
+                if (!allowedFields.Contains(field.Name))
+                    return false;
+            }
+        }
+
+        // Check 'minProperties' and 'maxProperties'
+        if (schema.Contains("minProperties") && document.ElementCount < schema["minProperties"].ToInt32())
+            return false;
+        if (schema.Contains("maxProperties") && document.ElementCount > schema["maxProperties"].ToInt32())
+            return false;
+
+        return true;
+    }
+
+    private static bool MatchesPropertySchema(BsonValue value, BsonDocument propSchema)
+    {
+        // bsonType
+        if (propSchema.Contains("bsonType"))
+        {
+            var expected = propSchema["bsonType"];
+            if (expected.IsString)
+            {
+                if (!BsonTypeMatches(value, expected.AsString))
+                    return false;
+            }
+            else if (expected.IsBsonArray)
+            {
+                if (!expected.AsBsonArray.Any(t => BsonTypeMatches(value, t.AsString)))
+                    return false;
+            }
+        }
+
+        // enum
+        if (propSchema.Contains("enum"))
+        {
+            if (!propSchema["enum"].AsBsonArray.Contains(value))
+                return false;
+        }
+
+        // Numeric constraints
+        if (value.IsNumeric)
+        {
+            var numVal = value.ToDouble();
+            if (propSchema.Contains("minimum") && numVal < propSchema["minimum"].ToDouble())
+                return false;
+            if (propSchema.Contains("maximum") && numVal > propSchema["maximum"].ToDouble())
+                return false;
+            if (propSchema.Contains("exclusiveMinimum") && numVal <= propSchema["exclusiveMinimum"].ToDouble())
+                return false;
+            if (propSchema.Contains("exclusiveMaximum") && numVal >= propSchema["exclusiveMaximum"].ToDouble())
+                return false;
+        }
+
+        // String constraints
+        if (value.IsString)
+        {
+            var str = value.AsString;
+            if (propSchema.Contains("minLength") && str.Length < propSchema["minLength"].ToInt32())
+                return false;
+            if (propSchema.Contains("maxLength") && str.Length > propSchema["maxLength"].ToInt32())
+                return false;
+            if (propSchema.Contains("pattern"))
+            {
+                var regex = new System.Text.RegularExpressions.Regex(propSchema["pattern"].AsString);
+                if (!regex.IsMatch(str))
+                    return false;
+            }
+        }
+
+        // Array constraints
+        if (value.IsBsonArray)
+        {
+            var arr = value.AsBsonArray;
+            if (propSchema.Contains("minItems") && arr.Count < propSchema["minItems"].ToInt32())
+                return false;
+            if (propSchema.Contains("maxItems") && arr.Count > propSchema["maxItems"].ToInt32())
+                return false;
+            if (propSchema.Contains("uniqueItems") && propSchema["uniqueItems"].AsBoolean)
+            {
+                if (arr.Distinct(BsonValueComparer.Instance).Count() != arr.Count)
+                    return false;
+            }
+        }
+
+        // Nested object
+        if (value.IsBsonDocument && propSchema.Contains("properties"))
+        {
+            return MatchesJsonSchema(value.AsBsonDocument, propSchema);
+        }
+
+        return true;
+    }
+
+    private static bool BsonTypeMatches(BsonValue value, string typeName)
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/jsonSchema/#available-keywords
+        return typeName switch
+        {
+            "double" => value.BsonType == BsonType.Double,
+            "string" => value.BsonType == BsonType.String,
+            "object" => value.BsonType == BsonType.Document,
+            "array" => value.BsonType == BsonType.Array,
+            "binData" => value.BsonType == BsonType.Binary,
+            "objectId" => value.BsonType == BsonType.ObjectId,
+            "bool" => value.BsonType == BsonType.Boolean,
+            "date" => value.BsonType == BsonType.DateTime,
+            "null" => value.BsonType == BsonType.Null,
+            "regex" => value.BsonType == BsonType.RegularExpression,
+            "int" => value.BsonType == BsonType.Int32,
+            "long" => value.BsonType == BsonType.Int64,
+            "decimal" => value.BsonType == BsonType.Decimal128,
+            "timestamp" => value.BsonType == BsonType.Timestamp,
+            "number" => value.IsNumeric,
+            _ => false
+        };
+    }
+
+    #endregion
+
+    #region $where
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/where/
+    //   "Use the $where operator to pass either a string containing a JavaScript expression
+    //    or a full JavaScript function to the query system."
+    //   "Map the specified JavaScript function, which can contain a full function or just
+    //    the body of a function."
+    // Note: Actual JavaScript execution requires the JsTriggers package.
+    // Without JsTriggers, $where throws NotSupportedException.
+    private static Func<BsonDocument, BsonValue, bool>? _whereEvaluator;
+
+    /// <summary>
+    /// Registers a custom $where evaluator (typically from the JsTriggers package).
+    /// </summary>
+    internal static void RegisterWhereEvaluator(Func<BsonDocument, BsonValue, bool> evaluator)
+    {
+        _whereEvaluator = evaluator;
+    }
+
+    private static bool EvaluateWhere(BsonDocument document, BsonValue whereExpr)
+    {
+        if (_whereEvaluator != null)
+            return _whereEvaluator(document, whereExpr);
+
+        throw new NotSupportedException(
+            "$where requires the MongoDB.InMemoryEmulator.JsTriggers package for JavaScript execution. " +
+            "Install the package and call JsExpressionSetup.Register() to enable $where support.");
+    }
+
+    #endregion
 }

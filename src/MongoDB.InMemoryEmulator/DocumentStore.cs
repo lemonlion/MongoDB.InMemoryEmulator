@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using MongoDB.Bson;
+using MongoDB.Driver;
 
 namespace MongoDB.InMemoryEmulator;
 
@@ -45,6 +46,21 @@ internal class DocumentStore
     private readonly SemaphoreSlim _collectionLock = new(1, 1);
     private readonly object _changeLogLock = new();
 
+    // Capped collection support
+    // Ref: https://www.mongodb.com/docs/manual/core/capped-collections/
+    //   "Capped collections are fixed-size collections that support high-throughput operations
+    //    that insert and retrieve documents based on insertion order."
+    private readonly List<BsonValue> _insertionOrder = new();
+    private readonly object _cappedLock = new();
+
+    // Insert subscribers for tailable cursors
+    private readonly List<Action<BsonDocument>> _insertSubscribers = new();
+    private readonly object _subscriberLock = new();
+
+    internal bool IsCapped { get; set; }
+    internal long? MaxDocuments { get; set; }
+    internal long? MaxSize { get; set; }
+
     internal IReadOnlyList<DocumentChangeRecord> ChangeLog
     {
         get
@@ -60,9 +76,20 @@ internal class DocumentStore
 
     /// <summary>
     /// Gets a snapshot of all documents.
+    /// For capped collections, returns documents in insertion order.
     /// </summary>
     internal IReadOnlyList<BsonDocument> GetAll()
     {
+        if (IsCapped)
+        {
+            lock (_cappedLock)
+            {
+                return _insertionOrder
+                    .Where(id => _documents.ContainsKey(id))
+                    .Select(id => _documents[id].DeepClone().AsBsonDocument)
+                    .ToList();
+            }
+        }
         return _documents.Values.Select(d => d.DeepClone().AsBsonDocument).ToList();
     }
 
@@ -98,7 +125,25 @@ internal class DocumentStore
         }
 
         _versions[id] = 1;
+
+        if (IsCapped)
+        {
+            lock (_cappedLock)
+            {
+                _insertionOrder.Add(id);
+                EvictOldestIfNeeded();
+            }
+        }
+        else
+        {
+            lock (_cappedLock)
+            {
+                _insertionOrder.Add(id);
+            }
+        }
+
         RecordChange(DocumentChangeType.Insert, id, doc.DeepClone().AsBsonDocument, null, null);
+        NotifyInsertSubscribers(doc);
         return doc;
     }
 
@@ -170,11 +215,25 @@ internal class DocumentStore
     /// </remarks>
     internal BsonDocument? Remove(BsonValue id)
     {
+        // Ref: https://www.mongodb.com/docs/manual/core/capped-collections/
+        //   "You cannot delete documents from a capped collection."
+        if (IsCapped)
+        {
+            throw new MongoCommandException(
+                MongoErrors.SyntheticConnectionId,
+                "cannot remove from a capped collection",
+                new BsonDocument("ok", 0));
+        }
+
         if (!_documents.TryRemove(id, out var removed))
             return null;
 
         _versions.TryRemove(id, out _);
         _docLocks.TryRemove(id, out _);
+        lock (_cappedLock)
+        {
+            _insertionOrder.Remove(id);
+        }
         RecordChange(DocumentChangeType.Delete, id, null, removed, null);
         return removed;
     }
@@ -187,6 +246,10 @@ internal class DocumentStore
         _documents.Clear();
         _versions.Clear();
         _docLocks.Clear();
+        lock (_cappedLock)
+        {
+            _insertionOrder.Clear();
+        }
         lock (_changeLogLock)
         {
             _changeLog.Clear();
@@ -203,6 +266,44 @@ internal class DocumentStore
         return new CollectionLockRelease(_collectionLock);
     }
 
+    /// <summary>
+    /// Subscribes to insert notifications (for tailable cursors).
+    /// Returns a disposable that unsubscribes when disposed.
+    /// </summary>
+    internal IDisposable SubscribeToInserts(Action<BsonDocument> callback)
+    {
+        lock (_subscriberLock)
+        {
+            _insertSubscribers.Add(callback);
+        }
+        return new InsertSubscription(this, callback);
+    }
+
+    private void NotifyInsertSubscribers(BsonDocument doc)
+    {
+        Action<BsonDocument>[] subscribers;
+        lock (_subscriberLock)
+        {
+            subscribers = _insertSubscribers.ToArray();
+        }
+        foreach (var sub in subscribers)
+        {
+            try { sub(doc.DeepClone().AsBsonDocument); }
+            catch { /* Swallow subscriber errors */ }
+        }
+    }
+
+    private sealed class InsertSubscription(DocumentStore store, Action<BsonDocument> callback) : IDisposable
+    {
+        public void Dispose()
+        {
+            lock (store._subscriberLock)
+            {
+                store._insertSubscribers.Remove(callback);
+            }
+        }
+    }
+
     internal static void EnsureId(BsonDocument doc)
     {
         // Ref: https://www.mongodb.com/docs/manual/core/document/#the-_id-field
@@ -213,6 +314,47 @@ internal class DocumentStore
             doc.Remove("_id");
             doc.InsertAt(0, new BsonElement("_id", ObjectId.GenerateNewId()));
         }
+    }
+
+    /// <summary>
+    /// Evicts oldest documents from a capped collection when MaxDocuments or MaxSize is exceeded.
+    /// Must be called while holding _cappedLock.
+    /// </summary>
+    private void EvictOldestIfNeeded()
+    {
+        // Ref: https://www.mongodb.com/docs/manual/core/capped-collections/
+        //   "Once a capped collection reaches its maximum size, inserts remove the oldest
+        //    documents in the collection to make room for the new documents."
+        while (MaxDocuments.HasValue && _insertionOrder.Count > MaxDocuments.Value)
+        {
+            EvictOldest();
+        }
+
+        while (MaxSize.HasValue && CalculateCollectionSize() > MaxSize.Value)
+        {
+            if (_insertionOrder.Count == 0) break;
+            EvictOldest();
+        }
+    }
+
+    private void EvictOldest()
+    {
+        if (_insertionOrder.Count == 0) return;
+        var oldestId = _insertionOrder[0];
+        _insertionOrder.RemoveAt(0);
+        _documents.TryRemove(oldestId, out _);
+        _versions.TryRemove(oldestId, out _);
+        _docLocks.TryRemove(oldestId, out _);
+    }
+
+    private long CalculateCollectionSize()
+    {
+        long total = 0;
+        foreach (var doc in _documents.Values)
+        {
+            total += doc.ToBson().Length;
+        }
+        return total;
     }
 
     private static void ValidateDocumentSize(BsonDocument doc)

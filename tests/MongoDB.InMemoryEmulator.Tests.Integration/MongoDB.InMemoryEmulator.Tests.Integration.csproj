@@ -25,6 +25,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\MongoDB.InMemoryEmulator.Tests.Shared\MongoDB.InMemoryEmulator.Tests.Shared.csproj" />
+		<ProjectReference Include="..\..\src\MongoDB.InMemoryEmulator.JsTriggers\MongoDB.InMemoryEmulator.JsTriggers.csproj" />
 	</ItemGroup>
 
 </Project>

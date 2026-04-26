@@ -99,7 +99,16 @@ public class InMemoryMongoDatabase : IMongoDatabase
             // Collection already explicitly created — OK per MongoDB behavior (no error for already existing)
         }
 
-        GetOrCreateStore(name);
+        var store = GetOrCreateStore(name);
+
+        // Ref: https://www.mongodb.com/docs/manual/core/capped-collections/
+        //   "To create a capped collection, use the create command with the capped option."
+        if (options?.Capped == true)
+        {
+            store.IsCapped = true;
+            store.MaxDocuments = options.MaxDocuments;
+            store.MaxSize = options.MaxSize;
+        }
 
         // Ref: https://www.mongodb.com/docs/manual/core/timeseries-collections/
         //   "Time series collections efficiently store time series data."

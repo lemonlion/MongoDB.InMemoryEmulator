@@ -181,6 +181,20 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     public IAsyncCursor<TDocument> FindSync(FilterDefinition<TDocument> filter, FindOptions<TDocument, TDocument>? options = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        // Ref: https://www.mongodb.com/docs/manual/core/tailable-cursors/
+        //   "Tailable cursors are only for use with capped collections."
+        if (options?.CursorType is (CursorType.Tailable or CursorType.TailableAwait) && _store.IsCapped)
+        {
+            var renderedFilter = RenderFilter(filter) ?? new BsonDocument();
+            return new InMemoryTailableCursor<TDocument>(
+                _store,
+                renderedFilter,
+                _serializer,
+                awaitData: options.CursorType == CursorType.TailableAwait,
+                maxAwaitTime: options.MaxAwaitTime);
+        }
+
         var docs = FindInternal(filter, options);
         var batchSize = options?.BatchSize ?? 101;
         return new InMemoryAsyncCursor<TDocument>(docs, batchSize);
@@ -189,6 +203,20 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     public IAsyncCursor<TProjection> FindSync<TProjection>(FilterDefinition<TDocument> filter, FindOptions<TDocument, TProjection>? options = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        // Tailable cursor support for capped collections (when TProjection == TDocument)
+        if (options?.CursorType is (CursorType.Tailable or CursorType.TailableAwait) && _store.IsCapped
+            && typeof(TProjection) == typeof(TDocument))
+        {
+            var renderedFilter = RenderFilter(filter) ?? new BsonDocument();
+            var tailable = new InMemoryTailableCursor<TDocument>(
+                _store,
+                renderedFilter,
+                _serializer,
+                awaitData: options.CursorType == CursorType.TailableAwait,
+                maxAwaitTime: options.MaxAwaitTime);
+            return (IAsyncCursor<TProjection>)(object)tailable;
+        }
 
         // Extract sort/skip/limit from options via reflection on base FindOptionsBase
         SortDefinition<TDocument>? sort = null;

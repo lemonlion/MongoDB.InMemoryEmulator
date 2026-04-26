@@ -279,6 +279,9 @@ internal static class AggregationPipelineExecutor
                     "$lastN" => ComputeLastN(groupDocs, accSpec),
                     "$maxN" => ComputeMaxN(groupDocs, accSpec),
                     "$minN" => ComputeMinN(groupDocs, accSpec),
+                    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/accumulator/
+                    //   "Defines a custom accumulator function."
+                    "$accumulator" => AggregationExpressionEvaluator.EvalAccumulator(accSpec, groupDocs, null),
                     _ => throw new NotSupportedException($"Accumulator '{op}' is not supported.")
                 };
             }

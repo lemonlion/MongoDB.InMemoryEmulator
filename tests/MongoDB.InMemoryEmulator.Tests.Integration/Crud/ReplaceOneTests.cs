@@ -90,6 +90,8 @@ public class ReplaceOneTests : IAsyncLifetime
         var replacement = new TestDoc { Id = ObjectId.GenerateNewId().ToString(), Name = "DiffId" };
 
         var act = () => collection.ReplaceOneAsync(filter, replacement);
-        await act.Should().ThrowAsync<MongoCommandException>();
+        // Real MongoDB throws MongoWriteException; in-memory throws MongoCommandException.
+        // Both are subtypes of MongoServerException.
+        await act.Should().ThrowAsync<MongoServerException>();
     }
 }

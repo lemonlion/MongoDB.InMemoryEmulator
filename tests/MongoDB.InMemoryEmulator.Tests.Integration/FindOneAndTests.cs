@@ -84,11 +84,12 @@ public class FindOneAndTests : IAsyncLifetime
     public async Task FindOneAndReplace_ReturnsBefore_ByDefault()
     {
         var col = _fixture.GetCollection<TestDoc>("findoneand_1");
-        await col.InsertOneAsync(new TestDoc { Name = "Alice", Value = 1 });
+        var original = new TestDoc { Name = "Alice", Value = 1 };
+        await col.InsertOneAsync(original);
 
         var before = await col.FindOneAndReplaceAsync(
             Builders<TestDoc>.Filter.Eq(x => x.Name, "Alice"),
-            new TestDoc { Name = "Alice", Value = 99 });
+            new TestDoc { Id = original.Id, Name = "Alice", Value = 99 });
 
         Assert.Equal(1, before.Value);
 
@@ -101,11 +102,12 @@ public class FindOneAndTests : IAsyncLifetime
     public async Task FindOneAndReplace_ReturnAfter()
     {
         var col = _fixture.GetCollection<TestDoc>("findoneand_1");
-        await col.InsertOneAsync(new TestDoc { Name = "Alice", Value = 1 });
+        var original = new TestDoc { Name = "Alice", Value = 1 };
+        await col.InsertOneAsync(original);
 
         var after = await col.FindOneAndReplaceAsync(
             Builders<TestDoc>.Filter.Eq(x => x.Name, "Alice"),
-            new TestDoc { Name = "Alice", Value = 99 },
+            new TestDoc { Id = original.Id, Name = "Alice", Value = 99 },
             new FindOneAndReplaceOptions<TestDoc> { ReturnDocument = ReturnDocument.After });
 
         Assert.Equal(99, after.Value);

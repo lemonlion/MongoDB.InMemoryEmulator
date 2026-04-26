@@ -116,7 +116,12 @@ public class SetWindowFieldsTests : IAsyncLifetime
             new BsonDocument("$setWindowFields", new BsonDocument
             {
                 { "sortBy", new BsonDocument("t", 1) },
-                { "output", new BsonDocument("rate", new BsonDocument("$derivative", new BsonDocument("input", "$val"))) }
+                { "output", new BsonDocument("rate", new BsonDocument
+                    {
+                        { "$derivative", new BsonDocument("input", "$val") },
+                        { "window", new BsonDocument("documents", new BsonArray { -1, 0 }) }
+                    })
+                }
             }));
 
         var results = await collection.Aggregate(pipeline).ToListAsync();

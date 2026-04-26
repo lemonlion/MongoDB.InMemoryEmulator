@@ -8,8 +8,11 @@ namespace MongoDB.InMemoryEmulator.Tests.Integration;
 /// <summary>
 /// Phase 4 integration tests: Change streams (Watch) on collection, database, and client.
 /// Uses BsonDocument output pipeline for raw access to change events.
+/// Change stream timing and delivery semantics differ between in-memory (synchronous) and
+/// real MongoDB (requires polling with timeouts), so these tests target in-memory only.
 /// </summary>
 [Collection("Integration")]
+[Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
 public class ChangeStreamTests : IAsyncLifetime
 {
     private readonly MongoDbSession _session;
@@ -247,6 +250,7 @@ public class ChangeStreamTests : IAsyncLifetime
     [Fact]
     public async Task GetResumeToken_returns_sequence_based_token()
     {
+        // In-memory uses integer-based _seq tokens; real MongoDB uses opaque BSON resume tokens
         var collection = _fixture.GetCollection<BsonDocument>("cs_token");
 
         using var cursor = collection.Watch(RawPipeline());

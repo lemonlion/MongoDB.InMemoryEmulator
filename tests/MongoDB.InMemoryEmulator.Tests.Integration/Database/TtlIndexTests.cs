@@ -15,8 +15,11 @@ namespace MongoDB.InMemoryEmulator.Tests.Integration.Database;
 ///   "If the indexed field in a document doesn't contain one or more date values,
 ///    the document will not expire."
 ///   "If a document does not contain the indexed field, the document will not expire."
+/// TTL eviction in the in-memory emulator is lazy (on read), unlike real MongoDB which uses a
+/// background thread (60-second interval). These tests verify lazy eviction semantics.
 /// </remarks>
 [Collection("Integration")]
+[Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
 public class TtlIndexTests : IAsyncLifetime
 {
     private readonly MongoDbSession _session;

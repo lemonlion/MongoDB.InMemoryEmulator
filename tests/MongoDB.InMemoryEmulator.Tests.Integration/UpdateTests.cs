@@ -346,10 +346,13 @@ public class UpdateTests : IAsyncLifetime
         var col = _fixture.GetCollection<BsonDocument>("update_1");
         await col.InsertOneAsync(new BsonDocument { { "name", "A" } });
 
-        await Assert.ThrowsAsync<MongoCommandException>(async () =>
+        // Real MongoDB throws MongoWriteException; in-memory throws MongoCommandException.
+        // Both contain error code 66 (ImmutableField).
+        var ex = await Assert.ThrowsAnyAsync<MongoServerException>(async () =>
             await col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("name", "A"),
                 Builders<BsonDocument>.Update.Set("_id", "newId")));
+        Assert.Contains("immutable field '_id'", ex.Message);
     }
 
     #endregion

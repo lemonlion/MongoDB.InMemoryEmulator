@@ -36,7 +36,7 @@ public class RunCommandTests : IAsyncLifetime
         // Ref: https://www.mongodb.com/docs/manual/reference/command/ping/
         //   "The ping command is a simple diagnostic command."
         var result = _fixture.Database.RunCommand<BsonDocument>(new BsonDocument("ping", 1));
-        Assert.Equal(1, result["ok"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
     }
 
     [Fact]
@@ -44,7 +44,7 @@ public class RunCommandTests : IAsyncLifetime
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/command/buildInfo/
         var result = _fixture.Database.RunCommand<BsonDocument>(new BsonDocument("buildInfo", 1));
-        Assert.Equal(1, result["ok"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
         Assert.True(result.Contains("version"));
     }
 
@@ -53,7 +53,7 @@ public class RunCommandTests : IAsyncLifetime
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/command/serverStatus/
         var result = _fixture.Database.RunCommand<BsonDocument>(new BsonDocument("serverStatus", 1));
-        Assert.Equal(1, result["ok"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
         Assert.True(result.Contains("host"));
         Assert.True(result.Contains("connections"));
     }
@@ -63,7 +63,7 @@ public class RunCommandTests : IAsyncLifetime
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/command/hostInfo/
         var result = _fixture.Database.RunCommand<BsonDocument>(new BsonDocument("hostInfo", 1));
-        Assert.Equal(1, result["ok"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
         Assert.True(result.Contains("system"));
     }
 
@@ -72,7 +72,7 @@ public class RunCommandTests : IAsyncLifetime
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/command/connectionStatus/
         var result = _fixture.Database.RunCommand<BsonDocument>(new BsonDocument("connectionStatus", 1));
-        Assert.Equal(1, result["ok"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
         Assert.True(result.Contains("authInfo"));
     }
 
@@ -91,8 +91,8 @@ public class RunCommandTests : IAsyncLifetime
         var result = _fixture.Database.RunCommand<BsonDocument>(
             new BsonDocument { { "count", "rc_count" } });
 
-        Assert.Equal(1, result["ok"].AsInt32);
-        Assert.Equal(3, result["n"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
+        Assert.Equal(3, result["n"].ToInt32());
     }
 
     [Fact]
@@ -134,7 +134,7 @@ public class RunCommandTests : IAsyncLifetime
             { "key", "color" }
         });
 
-        Assert.Equal(1, result["ok"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
         var values = result["values"].AsBsonArray.Select(v => v.AsString).ToList();
         Assert.Equal(3, values.Count);
         Assert.Contains("red", values);
@@ -156,8 +156,8 @@ public class RunCommandTests : IAsyncLifetime
         var result = _fixture.Database.RunCommand<BsonDocument>(
             new BsonDocument("collStats", "rc_stats"));
 
-        Assert.Equal(1, result["ok"].AsInt32);
-        Assert.Equal(2, result["count"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
+        Assert.Equal(2, result["count"].ToInt32());
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public class RunCommandTests : IAsyncLifetime
         var result = _fixture.Database.RunCommand<BsonDocument>(
             new BsonDocument("dbStats", 1));
 
-        Assert.Equal(1, result["ok"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
         Assert.True(result.Contains("collections"));
         Assert.True(result.Contains("objects"));
     }
@@ -179,7 +179,7 @@ public class RunCommandTests : IAsyncLifetime
         var result = _fixture.Database.RunCommand<BsonDocument>(
             new BsonDocument("create", "rc_created"));
 
-        Assert.Equal(1, result["ok"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
 
         // Verify collection exists
         var names = _fixture.Database.ListCollectionNames().ToList();
@@ -194,7 +194,7 @@ public class RunCommandTests : IAsyncLifetime
         var result = _fixture.Database.RunCommand<BsonDocument>(
             new BsonDocument("drop", "rc_to_drop"));
 
-        Assert.Equal(1, result["ok"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
     }
 
     [Fact]
@@ -202,15 +202,17 @@ public class RunCommandTests : IAsyncLifetime
     {
         var result = await _fixture.Database.RunCommandAsync<BsonDocument>(
             new BsonDocument("ping", 1));
-        Assert.Equal(1, result["ok"].AsInt32);
+        Assert.Equal(1, result["ok"].ToInt32());
     }
 
     [Fact]
-    public void Unknown_command_returns_error()
+    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    public void Unknown_command_returns_error_document()
     {
+        // In-memory returns an error document; real MongoDB throws MongoCommandException
         var result = _fixture.Database.RunCommand<BsonDocument>(
             new BsonDocument("unknownCommand", 1));
-        Assert.Equal(0, result["ok"].AsInt32);
+        Assert.Equal(0, result["ok"].ToInt32());
         Assert.True(result.Contains("errmsg"));
     }
 }

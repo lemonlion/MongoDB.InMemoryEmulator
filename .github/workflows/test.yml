@@ -29,26 +29,21 @@ jobs:
   test-mongodb:
     name: Tests (Real MongoDB)
     runs-on: ubuntu-latest
-    services:
-      mongodb:
-        image: mongo:7.0.14
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-          --health-start-period 10s
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Start MongoDB with replica set
+        run: |
+          docker run -d --name mongodb -p 27017:27017 mongo:7.0.14 --replSet rs0
+          for i in $(seq 1 30); do
+            docker exec mongodb mongosh --quiet --eval "db.runCommand({ping:1}).ok" && break
+            sleep 1
+          done
       - name: Initialize replica set
         run: |
-          docker exec $(docker ps -q --filter "ancestor=mongo:7.0.14") \
-            mongosh --quiet --eval "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] })"
+          docker exec mongodb mongosh --quiet --eval "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] })"
           sleep 3
       - run: dotnet test --configuration Release --filter "Target!=InMemoryOnly&Target!=AtlasOnly" --logger "trx;LogFileName=results.trx"
         env:

@@ -195,6 +195,28 @@ internal static class AggregationExpressionEvaluator
             // Let
             "$let" => EvalLet(doc, args, variables),
 
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/binarySize/
+            //   "Returns the size in bytes of a given string or binary data value."
+            "$binarySize" => EvalBinarySize(doc, args, variables),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/bsonSize/
+            //   "Returns the size in bytes of a given document when encoded as BSON."
+            "$bsonSize" => EvalBsonSize(doc, args, variables),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/rand/
+            //   "Returns a random float between 0 and 1."
+            "$rand" => new BsonDouble(Random.Shared.NextDouble()),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/sampleRate/
+            //   "Matches a random selection of input documents."
+            "$sampleRate" => new BsonBoolean(Random.Shared.NextDouble() < Evaluate(doc, args, variables).ToDouble()),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/toHashedIndexKey/
+            //   "Computes and returns the hash value of the input expression using the same hash function."
+            "$toHashedIndexKey" => EvalToHashedIndexKey(doc, args, variables),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/tsIncrement/
+            //   "Returns the incrementing ordinal from a timestamp as a long."
+            "$tsIncrement" => EvalTsIncrement(doc, args, variables),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/tsSecond/
+            //   "Returns the seconds from a timestamp as a long."
+            "$tsSecond" => EvalTsSecond(doc, args, variables),
+
             _ => throw new NotSupportedException($"Expression operator '{op}' is not supported.")
         };
     }
@@ -1082,6 +1104,56 @@ internal static class AggregationExpressionEvaluator
         if (value.IsBoolean) return value.AsBoolean;
         if (value.IsNumeric) return value.ToDouble() != 0;
         return true;
+    }
+
+    #endregion
+
+    #region Size Operators
+
+    private static BsonValue EvalBinarySize(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var val = Evaluate(doc, args, variables);
+        if (val == BsonNull.Value) return BsonNull.Value;
+        if (val.BsonType == BsonType.String)
+            return new BsonInt32(System.Text.Encoding.UTF8.GetByteCount(val.AsString));
+        if (val.BsonType == BsonType.Binary)
+            return new BsonInt32(val.AsByteArray.Length);
+        return BsonNull.Value;
+    }
+
+    private static BsonValue EvalBsonSize(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var val = Evaluate(doc, args, variables);
+        if (val == BsonNull.Value) return BsonNull.Value;
+        if (val is BsonDocument bsonDoc)
+            return new BsonInt32(bsonDoc.ToBson().Length);
+        return BsonNull.Value;
+    }
+
+    #endregion
+
+    #region Hash / Timestamp Operators
+
+    private static BsonValue EvalToHashedIndexKey(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var val = Evaluate(doc, args, variables);
+        // Use a simple hash — MongoDB uses md5-based hashing internally
+        var hash = val.GetHashCode();
+        return new BsonInt64(hash);
+    }
+
+    private static BsonValue EvalTsIncrement(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var val = Evaluate(doc, args, variables);
+        if (val.BsonType != BsonType.Timestamp) return BsonNull.Value;
+        return new BsonInt64(val.AsBsonTimestamp.Increment);
+    }
+
+    private static BsonValue EvalTsSecond(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var val = Evaluate(doc, args, variables);
+        if (val.BsonType != BsonType.Timestamp) return BsonNull.Value;
+        return new BsonInt64(val.AsBsonTimestamp.Timestamp);
     }
 
     #endregion

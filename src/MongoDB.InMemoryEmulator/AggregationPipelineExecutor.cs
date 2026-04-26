@@ -59,6 +59,9 @@ internal static class AggregationPipelineExecutor
                 "$documents" => ExecuteDocuments(stageSpec.AsBsonArray),
                 "$collStats" => ExecuteCollStats(stageSpec.AsBsonDocument, context),
                 "$indexStats" => ExecuteIndexStats(context),
+                // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/geoNear/
+                //   "Returns documents ordered by proximity to a specified point."
+                "$geoNear" => ExecuteGeoNear(current, stageSpec.AsBsonDocument),
                 _ => throw new NotSupportedException($"Aggregation stage '{stageName}' is not supported.")
             };
         }
@@ -1519,6 +1522,90 @@ internal static class AggregationPipelineExecutor
             { "key", new BsonDocument("_id", 1) },
             { "accesses", new BsonDocument { { "ops", 0L }, { "since", new BsonDateTime(DateTime.UtcNow) } } }
         };
+    }
+
+    #endregion
+
+    #region GeoNear
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/geoNear/
+    //   "Outputs documents in order of nearest to farthest from a specified point."
+    //   "$geoNear must be the first stage in the pipeline."
+    private static IEnumerable<BsonDocument> ExecuteGeoNear(IEnumerable<BsonDocument> input, BsonDocument spec)
+    {
+        var nearPoint = GeoJsonHelper.ExtractPoint(spec["near"]);
+        if (nearPoint == null) return input;
+
+        var distanceField = spec["distanceField"].AsString;
+        var spherical = spec.GetValue("spherical", true).ToBoolean();
+        var maxDistance = spec.Contains("maxDistance") ? spec["maxDistance"].ToDouble() : double.MaxValue;
+        var minDistance = spec.Contains("minDistance") ? spec["minDistance"].ToDouble() : 0.0;
+        var query = spec.Contains("query") ? spec["query"].AsBsonDocument : null;
+        var key = spec.Contains("key") ? spec["key"].AsString : null;
+        var includeLocs = spec.Contains("includeLocs") ? spec["includeLocs"].AsString : null;
+        var distanceMultiplier = spec.Contains("distanceMultiplier") ? spec["distanceMultiplier"].ToDouble() : 1.0;
+
+        var results = new List<(BsonDocument doc, double distance)>();
+
+        foreach (var doc in input)
+        {
+            if (query != null && !BsonFilterEvaluator.Matches(doc, query))
+                continue;
+
+            // Find the geo field
+            BsonValue? geoValue = null;
+            if (key != null)
+            {
+                geoValue = BsonFilterEvaluator.ResolveFieldPath(doc, key);
+            }
+            else
+            {
+                // Auto-detect: find a field that looks like GeoJSON
+                foreach (var el in doc)
+                {
+                    if (el.Value is BsonDocument geoDoc && geoDoc.Contains("type") && geoDoc.Contains("coordinates"))
+                    {
+                        geoValue = geoDoc;
+                        break;
+                    }
+                }
+            }
+
+            if (geoValue == null || geoValue == BsonNull.Value) continue;
+
+            var docPoint = GeoJsonHelper.ExtractPoint(geoValue);
+            double dist;
+            if (docPoint != null)
+            {
+                dist = GeoJsonHelper.HaversineDistance(nearPoint, docPoint);
+            }
+            else
+            {
+                var geom = GeoJsonHelper.ToGeometry(geoValue.AsBsonDocument);
+                if (geom == null) continue;
+                dist = GeoJsonHelper.DistanceMeters(nearPoint, geom);
+            }
+
+            if (dist < minDistance || dist > maxDistance) continue;
+            results.Add((doc, dist));
+        }
+
+        results.Sort((a, b) => a.distance.CompareTo(b.distance));
+
+        return results.Select(r =>
+        {
+            var result = r.doc.DeepClone().AsBsonDocument;
+            SetFieldPath(result, distanceField, new BsonDouble(r.distance * distanceMultiplier));
+            if (includeLocs != null)
+            {
+                var geoField = key != null
+                    ? BsonFilterEvaluator.ResolveFieldPath(r.doc, key)
+                    : r.doc.Elements.FirstOrDefault(e => e.Value is BsonDocument d && d.Contains("type") && d.Contains("coordinates")).Value;
+                if (geoField != null)
+                    SetFieldPath(result, includeLocs, geoField);
+            }
+            return result;
+        }).ToList();
     }
 
     #endregion

@@ -384,6 +384,9 @@ public class InMemoryMongoDatabase : IMongoDatabase
             "drop" => HandleDrop(firstElement.Value.AsString),
             "createindexes" or "dropindexes" => new BsonDocument("ok", 1), // Index stubs
             "aggregate" => HandleAggregate(cmd),
+            // Ref: https://www.mongodb.com/docs/manual/reference/command/explain/
+            //   "Returns information on the execution of various operations."
+            "explain" => HandleExplain(cmd),
             _ => new BsonDocument
             {
                 { "ok", 0 },
@@ -528,6 +531,53 @@ public class InMemoryMongoDatabase : IMongoDatabase
                     { "firstBatch", new BsonArray(results) },
                     { "id", 0L },
                     { "ns", $"{DatabaseNamespace.DatabaseName}.{collName}" }
+                }
+            }
+        };
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/command/explain/
+    //   "Returns information on the execution of various operations."
+    private BsonDocument HandleExplain(BsonDocument cmd)
+    {
+        var inner = cmd.Contains("explain") ? cmd["explain"] : BsonNull.Value;
+        var verbosity = cmd.GetValue("verbosity", "queryPlanner").AsString;
+
+        // Extract collection name and count from the inner command
+        var collName = "unknown";
+        var nReturned = 0;
+        if (inner is BsonDocument innerDoc && innerDoc.ElementCount > 0)
+        {
+            var firstEl = innerDoc.GetElement(0);
+            if (firstEl.Value.IsString)
+                collName = firstEl.Value.AsString;
+
+            var store = GetStore(collName);
+            nReturned = store?.Count ?? 0;
+        }
+
+        return new BsonDocument
+        {
+            { "ok", 1 },
+            { "queryPlanner", new BsonDocument
+                {
+                    { "plannerVersion", 1 },
+                    { "namespace", $"{DatabaseNamespace.DatabaseName}.{collName}" },
+                    { "winningPlan", new BsonDocument
+                        {
+                            { "stage", "COLLSCAN" },
+                            { "direction", "forward" }
+                        }
+                    }
+                }
+            },
+            { "executionStats", new BsonDocument
+                {
+                    { "executionSuccess", true },
+                    { "nReturned", nReturned },
+                    { "executionTimeMillis", 0 },
+                    { "totalKeysExamined", 0 },
+                    { "totalDocsExamined", nReturned }
                 }
             }
         };

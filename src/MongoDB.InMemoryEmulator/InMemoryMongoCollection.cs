@@ -21,6 +21,18 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     private readonly InMemoryIndexManager<TDocument> _indexManager;
     private readonly List<BsonDocument>? _viewPipeline;
 
+    /// <summary>
+    /// Delegate for injecting faults into collection operations.
+    /// Parameters: (operationType, filter/document as BsonDocument).
+    /// Throw an exception to simulate a fault.
+    /// </summary>
+    public Action<string, BsonDocument?>? FaultInjector { get; set; }
+
+    /// <summary>
+    /// Operation log recording all operations for test assertions.
+    /// </summary>
+    public OperationLog OperationLog { get; } = new();
+
     internal InMemoryMongoCollection(
         CollectionNamespace collectionNamespace,
         IMongoDatabase database,
@@ -76,7 +88,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     {
         cancellationToken.ThrowIfCancellationRequested();
         var bson = SerializeDocument(document);
+        FaultInjector?.Invoke("insert", bson);
         _store.Insert(bson);
+        OperationLog.Record(new OperationRecord { Type = "InsertOne", Document = bson.DeepClone().AsBsonDocument });
 
         // Write generated _id back to original document (mirrors real driver behavior)
         WriteBackId(document, bson);
@@ -181,6 +195,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     public IAsyncCursor<TDocument> FindSync(FilterDefinition<TDocument> filter, FindOptions<TDocument, TDocument>? options = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var renderedFilterForLog = RenderFilter(filter);
+        FaultInjector?.Invoke("find", renderedFilterForLog);
+        OperationLog.Record(new OperationRecord { Type = "Find", Filter = renderedFilterForLog?.DeepClone().AsBsonDocument });
 
         // Ref: https://www.mongodb.com/docs/manual/core/tailable-cursors/
         //   "Tailable cursors are only for use with capped collections."
@@ -203,6 +220,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     public IAsyncCursor<TProjection> FindSync<TProjection>(FilterDefinition<TDocument> filter, FindOptions<TDocument, TProjection>? options = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var renderedFilterCheck = RenderFilter(filter);
+        FaultInjector?.Invoke("find", renderedFilterCheck);
+        OperationLog.Record(new OperationRecord { Type = "Find", Filter = renderedFilterCheck?.DeepClone().AsBsonDocument });
 
         // Tailable cursor support for capped collections (when TProjection == TDocument)
         if (options?.CursorType is (CursorType.Tailable or CursorType.TailableAwait) && _store.IsCapped
@@ -344,6 +364,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     public DeleteResult DeleteOne(FilterDefinition<TDocument> filter, DeleteOptions? options, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var renderedFilter = RenderFilter(filter);
+        FaultInjector?.Invoke("delete", renderedFilter);
+        OperationLog.Record(new OperationRecord { Type = "DeleteOne", Filter = renderedFilter?.DeepClone().AsBsonDocument });
         var matches = FindInternalBson(filter);
         if (matches.Count == 0)
             return new DeleteResult.Acknowledged(0);
@@ -474,6 +497,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     {
         cancellationToken.ThrowIfCancellationRequested();
         var updateBson = RenderUpdate(update);
+        var renderedFilter = RenderFilter(filter);
+        FaultInjector?.Invoke("update", renderedFilter);
+        OperationLog.Record(new OperationRecord { Type = "UpdateOne", Filter = renderedFilter?.DeepClone().AsBsonDocument, Update = updateBson is BsonDocument ud ? ud.DeepClone().AsBsonDocument : null });
         ValidateUpdate(updateBson);
 
         var matches = FindInternalBson(filter);
@@ -493,13 +519,21 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         var target = matches[0];
         var targetId = target["_id"];
-        var beforeChange = target.DeepClone().AsBsonDocument;
-        var updated = ApplyUpdate(target, updateBson, isUpsertInsert: false);
-        updated["_id"] = targetId; // Ensure _id is preserved
-        _store.Replace(targetId, updated);
 
-        PublishChangeEvent(ChangeStreamOperationType.Update, updated, beforeChange);
-        return new UpdateResult.Acknowledged(1, 1, null);
+        // Use DocumentStore.Update for atomic apply — prevents lost updates under concurrency
+        var (matched, modified, beforeChange) = _store.Update(targetId, currentDoc =>
+        {
+            var applied = ApplyUpdate(currentDoc, updateBson, isUpsertInsert: false);
+            applied["_id"] = targetId;
+            return applied;
+        });
+
+        if (matched && modified && beforeChange != null)
+        {
+            var afterDoc = _store.Get(targetId);
+            if (afterDoc != null) PublishChangeEvent(ChangeStreamOperationType.Update, afterDoc, beforeChange);
+        }
+        return new UpdateResult.Acknowledged(matched ? 1 : 0, modified ? 1 : 0, null);
     }
 
     public UpdateResult UpdateOne(IClientSessionHandle session, FilterDefinition<TDocument> filter, UpdateDefinition<TDocument> update, UpdateOptions? options = null, CancellationToken cancellationToken = default)
@@ -761,6 +795,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         var registry = BsonSerializer.SerializerRegistry;
         var rendered = pipeline.Render(new RenderArgs<TDocument>(_serializer, registry));
         var stages = rendered.Documents.ToList();
+
+        FaultInjector?.Invoke("aggregate", null);
+        OperationLog.Record(new OperationRecord { Type = "Aggregate", Pipeline = stages.Select(s => s.DeepClone().AsBsonDocument).ToArray() });
 
         // Build aggregation context for cross-collection stages ($lookup, $merge, $out, etc.)
         var db = Database as InMemoryMongoDatabase;

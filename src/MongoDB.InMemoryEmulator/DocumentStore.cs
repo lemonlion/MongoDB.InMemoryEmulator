@@ -158,21 +158,29 @@ internal class DocumentStore
     internal bool Replace(BsonValue id, BsonDocument replacement)
     {
         ValidateDocumentSize(replacement);
+        var docLock = _docLocks.GetOrAdd(id, _ => new SemaphoreSlim(1, 1));
+        docLock.Wait();
+        try
+        {
+            if (!_documents.TryGetValue(id, out var existing))
+                return false;
 
-        if (!_documents.TryGetValue(id, out var existing))
-            return false;
+            var before = existing.DeepClone().AsBsonDocument;
+            var newDoc = replacement.DeepClone().AsBsonDocument;
 
-        var before = existing.DeepClone().AsBsonDocument;
-        var newDoc = replacement.DeepClone().AsBsonDocument;
+            // Ensure _id is preserved
+            if (!newDoc.Contains("_id"))
+                newDoc.InsertAt(0, new BsonElement("_id", id));
 
-        // Ensure _id is preserved
-        if (!newDoc.Contains("_id"))
-            newDoc.InsertAt(0, new BsonElement("_id", id));
-
-        _documents[id] = newDoc;
-        _versions.AddOrUpdate(id, 1, (_, v) => v + 1);
-        RecordChange(DocumentChangeType.Replace, id, newDoc.DeepClone().AsBsonDocument, before, null);
-        return true;
+            _documents[id] = newDoc;
+            _versions.AddOrUpdate(id, 1, (_, v) => v + 1);
+            RecordChange(DocumentChangeType.Replace, id, newDoc.DeepClone().AsBsonDocument, before, null);
+            return true;
+        }
+        finally
+        {
+            docLock.Release();
+        }
     }
 
     /// <summary>
@@ -182,28 +190,37 @@ internal class DocumentStore
     /// </summary>
     internal (bool Matched, bool Modified, BsonDocument? Before) Update(BsonValue id, Func<BsonDocument, BsonDocument> updateAction)
     {
-        if (!_documents.TryGetValue(id, out var existing))
-            return (false, false, null);
-
-        var before = existing.DeepClone().AsBsonDocument;
-        var updated = updateAction(existing.DeepClone().AsBsonDocument);
-        ValidateDocumentSize(updated);
-
-        // Ensure _id is not changed
-        if (!updated.Contains("_id"))
-            updated.InsertAt(0, new BsonElement("_id", id));
-
-        bool modified = !existing.Equals(updated);
-        if (modified)
+        var docLock = _docLocks.GetOrAdd(id, _ => new SemaphoreSlim(1, 1));
+        docLock.Wait();
+        try
         {
-            _documents[id] = updated;
-            _versions.AddOrUpdate(id, 1, (_, v) => v + 1);
+            if (!_documents.TryGetValue(id, out var existing))
+                return (false, false, null);
 
-            var updateDesc = BuildUpdateDescription(before, updated);
-            RecordChange(DocumentChangeType.Update, id, updated.DeepClone().AsBsonDocument, before, updateDesc);
+            var before = existing.DeepClone().AsBsonDocument;
+            var updated = updateAction(existing.DeepClone().AsBsonDocument);
+            ValidateDocumentSize(updated);
+
+            // Ensure _id is not changed
+            if (!updated.Contains("_id"))
+                updated.InsertAt(0, new BsonElement("_id", id));
+
+            bool modified = !existing.Equals(updated);
+            if (modified)
+            {
+                _documents[id] = updated;
+                _versions.AddOrUpdate(id, 1, (_, v) => v + 1);
+
+                var updateDesc = BuildUpdateDescription(before, updated);
+                RecordChange(DocumentChangeType.Update, id, updated.DeepClone().AsBsonDocument, before, updateDesc);
+            }
+
+            return (true, modified, before);
         }
-
-        return (true, modified, before);
+        finally
+        {
+            docLock.Release();
+        }
     }
 
     /// <summary>

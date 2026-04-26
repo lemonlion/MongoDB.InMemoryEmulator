@@ -56,11 +56,12 @@ services.UseInMemoryMongoDB(options =>
 | State Persistence (Export/Import) | ✅ |
 | DI Integration (2 extension methods) | ✅ |
 
-## Optional Packages
+## NuGet Packages
 
-| Package | Purpose |
-|---------|---------|
-| `MongoDB.InMemoryEmulator.JsTriggers` | JavaScript `$function`, `$accumulator`, `$where` via Jint |
+| Framework | Package | Description | NuGet |
+|---|---|---|---|
+| **Core library** | `MongoDB.InMemoryEmulator` | Primary features | [![NuGet Version](https://img.shields.io/nuget/v/MongoDB.InMemoryEmulator)](https://www.nuget.org/packages/MongoDB.InMemoryEmulator) |
+| **JavaScript Triggers** | `MongoDB.InMemoryEmulator.JsTriggers` | `$function`, `$accumulator`, `$where` via Jint | [![NuGet Version](https://img.shields.io/nuget/v/MongoDB.InMemoryEmulator.JsTriggers)](https://www.nuget.org/packages/MongoDB.InMemoryEmulator.JsTriggers) |
 
 ## Documentation
 

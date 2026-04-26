@@ -5,12 +5,12 @@
 		<Description>A high-fidelity, in-memory implementation of the MongoDB .NET Driver interfaces — purpose-built for fast, reliable component and integration testing. Drop-in replacements for IMongoClient, IMongoDatabase, and IMongoCollection&lt;T&gt; with full CRUD, filter evaluation, aggregation pipeline, change streams, transactions, LINQ, and DI integration. Zero production code changes required.</Description>
 		<PackageTags>mongodb;mongo;testing;in-memory;emulator;mock;fake;integration-testing;component-testing</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
-		<PackageIcon>icon.svg</PackageIcon>
+		<PackageIcon>icon.png</PackageIcon>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<None Include="..\..\README.md" Pack="true" PackagePath="" />
-		<None Include="..\..\icon.svg" Pack="true" PackagePath="" />
+		<None Include="..\..\icon.png" Pack="true" PackagePath="" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
 using MongoDB.Driver.Core.Clusters;
 
@@ -16,6 +17,7 @@ namespace MongoDB.InMemoryEmulator;
 public class InMemoryMongoClient : IMongoClient
 {
     private readonly ConcurrentDictionary<string, InMemoryMongoDatabase> _databases = new();
+    internal readonly ChangeStreamNotifier ChangeNotifier = new();
 
     public InMemoryMongoClient(MongoClientSettings? settings = null)
     {
@@ -131,25 +133,37 @@ public class InMemoryMongoClient : IMongoClient
 
     #endregion
 
-    #region Sessions (stub — full implementation in Phase 4)
+    #region Sessions
 
+    // Ref: https://www.mongodb.com/docs/manual/reference/method/Mongo.startSession/
+    //   "Starts a session for the connection. Returns a ClientSession."
     public IClientSessionHandle StartSession(ClientSessionOptions? options = null, CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException("Sessions are not yet implemented. Coming in Phase 4.");
+        return new InMemoryClientSessionHandle(this, options);
     }
 
     public Task<IClientSessionHandle> StartSessionAsync(ClientSessionOptions? options = null, CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException("Sessions are not yet implemented. Coming in Phase 4.");
+        return Task.FromResult<IClientSessionHandle>(new InMemoryClientSessionHandle(this, options));
     }
 
     #endregion
 
-    #region Watch (stub — full implementation in Phase 4)
+    #region Watch
 
+    // Ref: https://www.mongodb.com/docs/manual/changeStreams/
+    //   "You can open change streams against collections, databases, and deployments."
     public IChangeStreamCursor<TResult> Watch<TResult>(PipelineDefinition<ChangeStreamDocument<BsonDocument>, TResult> pipeline, ChangeStreamOptions? options = null, CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException("Watch is not yet implemented. Coming in Phase 4.");
+        var registry = BsonSerializer.SerializerRegistry;
+        var outputSerializer = registry.GetSerializer<TResult>();
+        return new InMemoryChangeStreamCursor<TResult>(
+            ChangeNotifier,
+            databaseFilter: null, // client-level: all databases
+            collectionFilter: null,
+            options,
+            outputSerializer,
+            startSequence: ChangeNotifier.CurrentSequence);
     }
 
     public IChangeStreamCursor<TResult> Watch<TResult>(IClientSessionHandle session, PipelineDefinition<ChangeStreamDocument<BsonDocument>, TResult> pipeline, ChangeStreamOptions? options = null, CancellationToken cancellationToken = default)

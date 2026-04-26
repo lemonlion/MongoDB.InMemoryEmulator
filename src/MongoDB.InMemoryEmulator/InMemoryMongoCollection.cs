@@ -19,12 +19,14 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     private readonly DocumentStore _store;
     private readonly IBsonSerializer<TDocument> _serializer;
     private readonly InMemoryIndexManager<TDocument> _indexManager;
+    private readonly List<BsonDocument>? _viewPipeline;
 
     internal InMemoryMongoCollection(
         CollectionNamespace collectionNamespace,
         IMongoDatabase database,
         DocumentStore store,
-        MongoCollectionSettings? settings = null)
+        MongoCollectionSettings? settings = null,
+        List<BsonDocument>? viewPipeline = null)
     {
         CollectionNamespace = collectionNamespace ?? throw new ArgumentNullException(nameof(collectionNamespace));
         Database = database ?? throw new ArgumentNullException(nameof(database));
@@ -32,6 +34,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         Settings = settings ?? new MongoCollectionSettings();
         _serializer = BsonSerializer.LookupSerializer<TDocument>();
         _indexManager = new InMemoryIndexManager<TDocument>(this, _store);
+        _viewPipeline = viewPipeline;
     }
 
     /// <summary>
@@ -77,6 +80,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         // Write generated _id back to original document (mirrors real driver behavior)
         WriteBackId(document, bson);
+
+        PublishChangeEvent(ChangeStreamOperationType.Insert, bson);
     }
 
     public void InsertOne(IClientSessionHandle session, TDocument document, InsertOneOptions? options = null, CancellationToken cancellationToken = default)
@@ -317,6 +322,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         var toDelete = matches[0];
         _store.Remove(toDelete["_id"]);
+        PublishChangeEvent(ChangeStreamOperationType.Delete, toDelete);
         return new DeleteResult.Acknowledged(1);
     }
 
@@ -397,7 +403,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             throw MongoErrors.ImmutableField("_id");
 
         replacementBson["_id"] = targetId;
+        var beforeChange = target.DeepClone().AsBsonDocument;
         var replaced = _store.Replace(targetId, replacementBson);
+
+        PublishChangeEvent(ChangeStreamOperationType.Replace, replacementBson, beforeChange);
         return new ReplaceOneResult.Acknowledged(1, replaced ? 1 : 0, null);
     }
 
@@ -456,9 +465,12 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         var target = matches[0];
         var targetId = target["_id"];
+        var beforeChange = target.DeepClone().AsBsonDocument;
         var updated = ApplyUpdate(target, updateBson, isUpsertInsert: false);
         updated["_id"] = targetId; // Ensure _id is preserved
         _store.Replace(targetId, updated);
+
+        PublishChangeEvent(ChangeStreamOperationType.Update, updated, beforeChange);
         return new UpdateResult.Acknowledged(1, 1, null);
     }
 
@@ -936,11 +948,21 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
     #endregion
 
-    #region Watch (stub — full implementation in Phase 4)
+    #region Watch
 
     public IChangeStreamCursor<TResult> Watch<TResult>(PipelineDefinition<ChangeStreamDocument<TDocument>, TResult> pipeline, ChangeStreamOptions? options = null, CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException("Watch is not yet implemented. Coming in Phase 4.");
+        var client = (Database as InMemoryMongoDatabase)?.Client as InMemoryMongoClient
+            ?? throw new NotSupportedException("Watch requires InMemoryMongoClient.");
+        var registry = BsonSerializer.SerializerRegistry;
+        var outputSerializer = registry.GetSerializer<TResult>();
+        return new InMemoryChangeStreamCursor<TResult>(
+            client.ChangeNotifier,
+            databaseFilter: CollectionNamespace.DatabaseNamespace.DatabaseName,
+            collectionFilter: CollectionNamespace.CollectionName,
+            options,
+            outputSerializer,
+            startSequence: client.ChangeNotifier.CurrentSequence);
     }
 
     public IChangeStreamCursor<TResult> Watch<TResult>(IClientSessionHandle session, PipelineDefinition<ChangeStreamDocument<TDocument>, TResult> pipeline, ChangeStreamOptions? options = null, CancellationToken cancellationToken = default)
@@ -1046,7 +1068,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         int? skip = null,
         int? limit = null)
     {
-        var allDocs = _store.GetAll();
+        var allDocs = GetStoreDocuments();
         var rendered = RenderFilter(filter);
 
         IEnumerable<BsonDocument> results = allDocs;
@@ -1093,6 +1115,25 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         return rendered;
     }
 
+    /// <summary>
+    /// Gets documents from the store, applying the view pipeline if this collection is backed by a view.
+    /// </summary>
+    private IReadOnlyList<BsonDocument> GetStoreDocuments()
+    {
+        var allDocs = _store.GetAll();
+        if (_viewPipeline == null || _viewPipeline.Count == 0) return allDocs;
+
+        // Ref: https://www.mongodb.com/docs/manual/core/views/
+        //   "When clients query a view, MongoDB appends the client query to the underlying pipeline."
+        var db = Database as InMemoryMongoDatabase;
+        var client = db?.Client as InMemoryMongoClient;
+        var context = new AggregationContext(db!, client)
+        {
+            CollectionNamespace = CollectionNamespace.FullName
+        };
+        return AggregationPipelineExecutor.Execute(allDocs, _viewPipeline, context).ToList();
+    }
+
     internal BsonValue RenderUpdate(UpdateDefinition<TDocument> update)
     {
         var registry = BsonSerializer.SerializerRegistry;
@@ -1135,6 +1176,21 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     {
         if (updateBson is BsonArray) return; // Pipeline update — valid by definition
         BsonUpdateEvaluator.ValidateIsUpdateDocument(updateBson.AsBsonDocument);
+    }
+
+    /// <summary>Publish a change event to the change stream notifier (if available).</summary>
+    private void PublishChangeEvent(ChangeStreamOperationType opType, BsonDocument doc, BsonDocument? beforeChange = null)
+    {
+        var client = (Database as InMemoryMongoDatabase)?.Client as InMemoryMongoClient;
+        client?.ChangeNotifier.Publish(new ChangeEvent
+        {
+            OperationType = opType,
+            DatabaseName = CollectionNamespace.DatabaseNamespace.DatabaseName,
+            CollectionName = CollectionNamespace.CollectionName,
+            DocumentKey = new BsonDocument("_id", doc.GetValue("_id", BsonNull.Value)),
+            FullDocument = doc.DeepClone().AsBsonDocument,
+            FullDocumentBeforeChange = beforeChange?.DeepClone().AsBsonDocument,
+        });
     }
 
     private BsonDocument ApplyProjectionIfNeeded<TProjection>(BsonDocument doc, ProjectionDefinition<TDocument, TProjection>? projection)

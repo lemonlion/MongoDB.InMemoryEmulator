@@ -1084,12 +1084,41 @@ internal static class AggregationPipelineExecutor
                         "$max" => ComputeWindowAggregate(sorted, i, opArgs, window, vals => { var valid = vals.Where(v => v != BsonNull.Value).ToList(); return valid.Count > 0 ? valid.Max(BsonValueComparer.Instance)! : BsonNull.Value; }),
                         "$count" => ComputeWindowAggregate(sorted, i, new BsonDocument(), window, vals => new BsonInt32(vals.Count)),
                         "$push" => ComputeWindowAggregate(sorted, i, opArgs, window, vals => new BsonArray(vals)),
+                        "$addToSet" => ComputeWindowAggregate(sorted, i, opArgs, window, vals => new BsonArray(vals.Distinct(BsonValueComparer.Instance).ToList())),
                         "$first" => ComputeWindowAggregate(sorted, i, opArgs, window, vals => vals.Count > 0 ? vals[0] : BsonNull.Value),
                         "$last" => ComputeWindowAggregate(sorted, i, opArgs, window, vals => vals.Count > 0 ? vals[^1] : BsonNull.Value),
+                        "$stdDevPop" => ComputeWindowAggregate(sorted, i, opArgs, window, vals =>
+                        {
+                            var nums = vals.Where(v => v.IsNumeric).Select(v => v.ToDouble()).ToList();
+                            if (nums.Count == 0) return BsonNull.Value;
+                            var mean = nums.Average();
+                            return new BsonDouble(Math.Sqrt(nums.Sum(v => (v - mean) * (v - mean)) / nums.Count));
+                        }),
+                        "$stdDevSamp" => ComputeWindowAggregate(sorted, i, opArgs, window, vals =>
+                        {
+                            var nums = vals.Where(v => v.IsNumeric).Select(v => v.ToDouble()).ToList();
+                            if (nums.Count < 2) return BsonNull.Value;
+                            var mean = nums.Average();
+                            return new BsonDouble(Math.Sqrt(nums.Sum(v => (v - mean) * (v - mean)) / (nums.Count - 1)));
+                        }),
                         "$rank" => new BsonInt32(ComputeRank(sorted, i, sortSpec)),
                         "$denseRank" => new BsonInt32(ComputeDenseRank(sorted, i, sortSpec)),
                         "$documentNumber" => new BsonInt32(i + 1),
                         "$shift" => ComputeShift(sorted, i, windowSpec),
+                        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/expMovingAvg/
+                        "$expMovingAvg" => ComputeExpMovingAvg(sorted, i, windowSpec),
+                        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/derivative/
+                        "$derivative" => ComputeDerivative(sorted, i, windowSpec),
+                        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/integral/
+                        "$integral" => ComputeIntegral(sorted, i, windowSpec, window),
+                        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/covariancePop/
+                        "$covariancePop" => ComputeCovariance(sorted, i, windowSpec, window, population: true),
+                        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/covarianceSamp/
+                        "$covarianceSamp" => ComputeCovariance(sorted, i, windowSpec, window, population: false),
+                        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/linearFill/
+                        "$linearFill" => ComputeLinearFill(sorted, i, opArgs),
+                        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/locf/
+                        "$locf" => ComputeLocf(sorted, i, opArgs),
                         _ => throw new NotSupportedException($"Window function '{op}' is not supported.")
                     };
                 }
@@ -1123,8 +1152,8 @@ internal static class AggregationPipelineExecutor
         if (window.Contains("documents"))
         {
             var docs = window["documents"].AsBsonArray;
-            int start = ResolveWindowBound(docs[0], currentIdx, total);
-            int end = ResolveWindowBound(docs[1], currentIdx, total);
+            int start = ResolveWindowBound(docs[0], currentIdx, total, isLower: true);
+            int end = ResolveWindowBound(docs[1], currentIdx, total, isLower: false);
             return (Math.Max(0, start), Math.Min(total - 1, end));
         }
 
@@ -1132,21 +1161,21 @@ internal static class AggregationPipelineExecutor
         if (window.Contains("range"))
         {
             var range = window["range"].AsBsonArray;
-            int start = ResolveWindowBound(range[0], currentIdx, total);
-            int end = ResolveWindowBound(range[1], currentIdx, total);
+            int start = ResolveWindowBound(range[0], currentIdx, total, isLower: true);
+            int end = ResolveWindowBound(range[1], currentIdx, total, isLower: false);
             return (Math.Max(0, start), Math.Min(total - 1, end));
         }
 
         return (0, total - 1);
     }
 
-    private static int ResolveWindowBound(BsonValue bound, int currentIdx, int total)
+    private static int ResolveWindowBound(BsonValue bound, int currentIdx, int total, bool isLower)
     {
         if (bound.IsString)
         {
             return bound.AsString switch
             {
-                "unbounded" => bound == "unbounded" ? 0 : total - 1,
+                "unbounded" => isLower ? 0 : total - 1,
                 "current" => currentIdx,
                 _ => currentIdx
             };
@@ -1210,6 +1239,167 @@ internal static class AggregationPipelineExecutor
         if (targetIdx < 0 || targetIdx >= sorted.Count)
             return defaultValue;
         return AggregationExpressionEvaluator.Evaluate(sorted[targetIdx], output);
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/expMovingAvg/
+    //   "Returns the exponential moving average of numeric expressions applied to documents
+    //    in a partition defined in the $setWindowFields stage."
+    private static BsonValue ComputeExpMovingAvg(List<BsonDocument> sorted, int idx, BsonDocument spec)
+    {
+        var emaSpec = spec["$expMovingAvg"].AsBsonDocument;
+        var input = emaSpec["input"];
+
+        // alpha can be provided directly or calculated from N: alpha = 2/(N+1)
+        double alpha;
+        if (emaSpec.Contains("alpha"))
+            alpha = emaSpec["alpha"].ToDouble();
+        else
+        {
+            var n = emaSpec["N"].ToInt32();
+            alpha = 2.0 / (n + 1);
+        }
+
+        // Compute EMA from the beginning of the partition up to current index
+        double? ema = null;
+        for (int i = 0; i <= idx; i++)
+        {
+            var val = AggregationExpressionEvaluator.Evaluate(sorted[i], input);
+            if (!val.IsNumeric) continue;
+            var v = val.ToDouble();
+            ema = ema == null ? v : alpha * v + (1 - alpha) * ema.Value;
+        }
+
+        return ema.HasValue ? new BsonDouble(ema.Value) : BsonNull.Value;
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/derivative/
+    //   "Returns the average rate of change within the specified window."
+    private static BsonValue ComputeDerivative(List<BsonDocument> sorted, int idx, BsonDocument spec)
+    {
+        var derivSpec = spec["$derivative"].AsBsonDocument;
+        var input = derivSpec["input"];
+
+        if (idx == 0) return BsonNull.Value;
+
+        var currVal = AggregationExpressionEvaluator.Evaluate(sorted[idx], input);
+        var prevVal = AggregationExpressionEvaluator.Evaluate(sorted[idx - 1], input);
+
+        if (!currVal.IsNumeric || !prevVal.IsNumeric) return BsonNull.Value;
+
+        // Simple derivative: change from previous to current
+        return new BsonDouble(currVal.ToDouble() - prevVal.ToDouble());
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/integral/
+    //   "Returns the approximation of the area under a curve."
+    private static BsonValue ComputeIntegral(List<BsonDocument> sorted, int idx, BsonDocument spec, BsonDocument? window)
+    {
+        var intSpec = spec["$integral"].AsBsonDocument;
+        var input = intSpec["input"];
+
+        var (start, end) = ResolveWindow(window, idx, sorted.Count);
+        if (start >= end) return new BsonDouble(0);
+
+        // Trapezoidal rule using index positions
+        double area = 0;
+        for (int i = start; i < end; i++)
+        {
+            var v0 = AggregationExpressionEvaluator.Evaluate(sorted[i], input);
+            var v1 = AggregationExpressionEvaluator.Evaluate(sorted[i + 1], input);
+            if (!v0.IsNumeric || !v1.IsNumeric) continue;
+            area += (v0.ToDouble() + v1.ToDouble()) / 2.0;
+        }
+
+        return new BsonDouble(area);
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/covariancePop/
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/covarianceSamp/
+    private static BsonValue ComputeCovariance(List<BsonDocument> sorted, int idx, BsonDocument spec, BsonDocument? window, bool population)
+    {
+        var opName = population ? "$covariancePop" : "$covarianceSamp";
+        var covArgs = spec[opName].AsBsonArray;
+        var expr1 = covArgs[0];
+        var expr2 = covArgs[1];
+
+        var (start, end) = ResolveWindow(window, idx, sorted.Count);
+
+        var pairs = new List<(double x, double y)>();
+        for (int i = start; i <= end; i++)
+        {
+            var v1 = AggregationExpressionEvaluator.Evaluate(sorted[i], expr1);
+            var v2 = AggregationExpressionEvaluator.Evaluate(sorted[i], expr2);
+            if (v1.IsNumeric && v2.IsNumeric)
+                pairs.Add((v1.ToDouble(), v2.ToDouble()));
+        }
+
+        if (pairs.Count == 0) return BsonNull.Value;
+        if (!population && pairs.Count < 2) return BsonNull.Value;
+
+        var meanX = pairs.Average(p => p.x);
+        var meanY = pairs.Average(p => p.y);
+        var cov = pairs.Sum(p => (p.x - meanX) * (p.y - meanY)) / (population ? pairs.Count : pairs.Count - 1);
+        return new BsonDouble(cov);
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/linearFill/
+    //   "Fills null and missing fields in a window using linear interpolation."
+    private static BsonValue ComputeLinearFill(List<BsonDocument> sorted, int idx, BsonValue fieldExpr)
+    {
+        var val = AggregationExpressionEvaluator.Evaluate(sorted[idx], fieldExpr);
+        if (val != BsonNull.Value && val.BsonType != BsonType.Undefined) return val;
+
+        // Find previous non-null
+        int prevIdx = -1;
+        BsonValue prevVal = BsonNull.Value;
+        for (int i = idx - 1; i >= 0; i--)
+        {
+            var v = AggregationExpressionEvaluator.Evaluate(sorted[i], fieldExpr);
+            if (v != BsonNull.Value && v.BsonType != BsonType.Undefined && v.IsNumeric)
+            {
+                prevIdx = i;
+                prevVal = v;
+                break;
+            }
+        }
+
+        // Find next non-null
+        int nextIdx = -1;
+        BsonValue nextVal = BsonNull.Value;
+        for (int i = idx + 1; i < sorted.Count; i++)
+        {
+            var v = AggregationExpressionEvaluator.Evaluate(sorted[i], fieldExpr);
+            if (v != BsonNull.Value && v.BsonType != BsonType.Undefined && v.IsNumeric)
+            {
+                nextIdx = i;
+                nextVal = v;
+                break;
+            }
+        }
+
+        if (prevIdx < 0 || nextIdx < 0) return BsonNull.Value;
+
+        // Linear interpolation
+        double fraction = (double)(idx - prevIdx) / (nextIdx - prevIdx);
+        double result = prevVal.ToDouble() + fraction * (nextVal.ToDouble() - prevVal.ToDouble());
+        return new BsonDouble(result);
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/locf/
+    //   "Last observation carried forward. Sets values for null and missing fields to the last non-null value."
+    private static BsonValue ComputeLocf(List<BsonDocument> sorted, int idx, BsonValue fieldExpr)
+    {
+        var val = AggregationExpressionEvaluator.Evaluate(sorted[idx], fieldExpr);
+        if (val != BsonNull.Value && val.BsonType != BsonType.Undefined) return val;
+
+        // Find previous non-null value
+        for (int i = idx - 1; i >= 0; i--)
+        {
+            var v = AggregationExpressionEvaluator.Evaluate(sorted[i], fieldExpr);
+            if (v != BsonNull.Value && v.BsonType != BsonType.Undefined) return v;
+        }
+
+        return BsonNull.Value;
     }
 
     #endregion

@@ -7,16 +7,16 @@ namespace MongoDB.InMemoryEmulator;
 /// Represents a change event recorded in the document store's change log.
 /// Used to power change streams.
 /// </summary>
-internal record ChangeEvent(
+internal record DocumentChangeRecord(
     long SequenceNumber,
-    ChangeEventType OperationType,
+    DocumentChangeType OperationType,
     BsonValue DocumentId,
     BsonDocument? FullDocument,
     BsonDocument? FullDocumentBeforeChange,
     BsonDocument? UpdateDescription,
     DateTimeOffset Timestamp);
 
-internal enum ChangeEventType
+internal enum DocumentChangeType
 {
     Insert,
     Update,
@@ -39,13 +39,13 @@ internal class DocumentStore
 
     private readonly ConcurrentDictionary<BsonValue, BsonDocument> _documents = new(BsonValueComparer.Instance);
     private readonly ConcurrentDictionary<BsonValue, long> _versions = new(BsonValueComparer.Instance);
-    private readonly List<ChangeEvent> _changeLog = new();
+    private readonly List<DocumentChangeRecord> _changeLog = new();
     private long _changeLogSequence;
     private readonly ConcurrentDictionary<BsonValue, SemaphoreSlim> _docLocks = new(BsonValueComparer.Instance);
     private readonly SemaphoreSlim _collectionLock = new(1, 1);
     private readonly object _changeLogLock = new();
 
-    internal IReadOnlyList<ChangeEvent> ChangeLog
+    internal IReadOnlyList<DocumentChangeRecord> ChangeLog
     {
         get
         {
@@ -98,7 +98,7 @@ internal class DocumentStore
         }
 
         _versions[id] = 1;
-        RecordChange(ChangeEventType.Insert, id, doc.DeepClone().AsBsonDocument, null, null);
+        RecordChange(DocumentChangeType.Insert, id, doc.DeepClone().AsBsonDocument, null, null);
         return doc;
     }
 
@@ -126,7 +126,7 @@ internal class DocumentStore
 
         _documents[id] = newDoc;
         _versions.AddOrUpdate(id, 1, (_, v) => v + 1);
-        RecordChange(ChangeEventType.Replace, id, newDoc.DeepClone().AsBsonDocument, before, null);
+        RecordChange(DocumentChangeType.Replace, id, newDoc.DeepClone().AsBsonDocument, before, null);
         return true;
     }
 
@@ -155,7 +155,7 @@ internal class DocumentStore
             _versions.AddOrUpdate(id, 1, (_, v) => v + 1);
 
             var updateDesc = BuildUpdateDescription(before, updated);
-            RecordChange(ChangeEventType.Update, id, updated.DeepClone().AsBsonDocument, before, updateDesc);
+            RecordChange(DocumentChangeType.Update, id, updated.DeepClone().AsBsonDocument, before, updateDesc);
         }
 
         return (true, modified, before);
@@ -175,7 +175,7 @@ internal class DocumentStore
 
         _versions.TryRemove(id, out _);
         _docLocks.TryRemove(id, out _);
-        RecordChange(ChangeEventType.Delete, id, null, removed, null);
+        RecordChange(DocumentChangeType.Delete, id, null, removed, null);
         return removed;
     }
 
@@ -229,12 +229,12 @@ internal class DocumentStore
         }
     }
 
-    private void RecordChange(ChangeEventType type, BsonValue id, BsonDocument? fullDoc, BsonDocument? beforeDoc, BsonDocument? updateDesc)
+    private void RecordChange(DocumentChangeType type, BsonValue id, BsonDocument? fullDoc, BsonDocument? beforeDoc, BsonDocument? updateDesc)
     {
         lock (_changeLogLock)
         {
             var seq = Interlocked.Increment(ref _changeLogSequence);
-            _changeLog.Add(new ChangeEvent(seq, type, id, fullDoc, beforeDoc, updateDesc, DateTimeOffset.UtcNow));
+            _changeLog.Add(new DocumentChangeRecord(seq, type, id, fullDoc, beforeDoc, updateDesc, DateTimeOffset.UtcNow));
         }
     }
 

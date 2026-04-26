@@ -96,9 +96,6 @@ jobs:
       - name: Push to NuGet.org
         run: dotnet nuget push "./nupkgs/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
 
-      - name: Push symbol packages
-        run: dotnet nuget push "./nupkgs/*.snupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
-
   release:
     name: Create GitHub Release
     needs: publish

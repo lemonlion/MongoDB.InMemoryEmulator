@@ -47,9 +47,8 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Initialize replica set
         run: |
-          mongosh --host localhost:27017 --eval "
-            rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] })
-          "
+          docker exec $(docker ps -q --filter "ancestor=mongo:7.0.14") \
+            mongosh --quiet --eval "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] })"
           sleep 3
       - run: dotnet test --configuration Release --filter "Target!=InMemoryOnly&Target!=AtlasOnly" --logger "trx;LogFileName=results.trx"
         env:

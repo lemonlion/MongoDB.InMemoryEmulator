@@ -28,8 +28,8 @@ public class InMemoryMongoClient : IMongoClient
 
     // Ref: https://www.mongodb.com/docs/drivers/csharp/current/
     //   IMongoClient.Cluster is used for cluster topology monitoring.
-    //   In-memory: return a minimal stub that doesn't throw.
-    public ICluster Cluster => throw new NotSupportedException("Cluster topology is not available in the in-memory emulator.");
+    //   In-memory: not supported — SDK components that need Cluster should use our in-memory alternatives.
+    public ICluster Cluster => throw new NotSupportedException("Cluster topology is not available in the in-memory emulator. Use InMemoryGridFSBucket for GridFS.");
 
     #region GetDatabase
 

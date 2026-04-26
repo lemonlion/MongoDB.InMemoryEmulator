@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <!-- Background: deep space navy -->
+    <linearGradient id="bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0D1B3E"/>
+      <stop offset="100%" stop-color="#0F1B2D"/>
+    </linearGradient>
+    <!-- Chip outline: MongoDB green palette -->
+    <linearGradient id="chip" x1="64" y1="24" x2="64" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A8E6A3"/>
+      <stop offset="100%" stop-color="#00ED64"/>
+    </linearGradient>
+    <!-- Leaf gradient: MongoDB green palette -->
+    <linearGradient id="leaf" x1="64" y1="36" x2="64" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A8E6A3"/>
+      <stop offset="50%" stop-color="#00ED64"/>
+      <stop offset="100%" stop-color="#00684A"/>
+    </linearGradient>
+    <!-- Leaf fill -->
+    <linearGradient id="leafFill" x1="64" y1="36" x2="64" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A8E6A3" stop-opacity="0.9"/>
+      <stop offset="50%" stop-color="#00ED64" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#00684A" stop-opacity="0.8"/>
+    </linearGradient>
+    <!-- Subtle center glow -->
+    <radialGradient id="glow" cx="64" cy="64" r="38" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00ED64" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#00684A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="128" height="128" rx="22" fill="url(#bg)"/>
+
+  <!-- Center glow behind chip -->
+  <circle cx="64" cy="64" r="38" fill="url(#glow)"/>
+
+  <!-- ===== MEMORY CHIP ===== -->
+  <!-- Chip body -->
+  <rect x="32" y="24" width="64" height="80" rx="5" fill="none" stroke="url(#chip)" stroke-width="2.5"/>
+
+  <!-- Chip notch (semicircle cutout at top center) -->
+  <path d="M56 24 A8 8 0 0 1 72 24" fill="#0D1B3E" stroke="url(#chip)" stroke-width="2.5"/>
+
+  <!-- Pins — left side -->
+  <rect x="18" y="36" width="16" height="3" rx="1.5" fill="#A8E6A3" opacity="0.85"/>
+  <rect x="18" y="48" width="16" height="3" rx="1.5" fill="#A8E6A3" opacity="0.70"/>
+  <rect x="18" y="60" width="16" height="3" rx="1.5" fill="#00ED64" opacity="0.55"/>
+  <rect x="18" y="72" width="16" height="3" rx="1.5" fill="#00ED64" opacity="0.45"/>
+  <rect x="18" y="84" width="16" height="3" rx="1.5" fill="#00684A" opacity="0.35"/>
+
+  <!-- Pins — right side -->
+  <rect x="94" y="36" width="16" height="3" rx="1.5" fill="#A8E6A3" opacity="0.85"/>
+  <rect x="94" y="48" width="16" height="3" rx="1.5" fill="#A8E6A3" opacity="0.70"/>
+  <rect x="94" y="60" width="16" height="3" rx="1.5" fill="#00ED64" opacity="0.55"/>
+  <rect x="94" y="72" width="16" height="3" rx="1.5" fill="#00ED64" opacity="0.45"/>
+  <rect x="94" y="84" width="16" height="3" rx="1.5" fill="#00684A" opacity="0.35"/>
+
+  <!-- ===== MONGODB LEAF (centered in chip) ===== -->
+  <g transform="translate(64, 64)">
+    <!-- Leaf shape — the iconic MongoDB leaf -->
+    <path d="
+      M0,-28
+      C-2,-24 -12,-14 -14,-4
+      C-16,8 -10,18 -4,26
+      C-2,29 -1,30 -1,34
+      L1,34
+      C1,30 2,29 4,26
+      C10,18 16,8 14,-4
+      C12,-14 2,-24 0,-28
+      Z"
+      fill="url(#leafFill)" stroke="url(#leaf)" stroke-width="1.2"/>
+
+    <!-- Center vein (stem line) -->
+    <line x1="0" y1="-20" x2="0" y2="28" stroke="#0D1B3E" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+
+    <!-- Small base/root -->
+    <rect x="-1.5" y="30" width="3" height="6" rx="1" fill="#00684A" opacity="0.7"/>
+  </g>
+
+</svg>

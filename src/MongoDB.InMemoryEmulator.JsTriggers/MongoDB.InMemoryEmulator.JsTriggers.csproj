@@ -5,10 +5,12 @@
 		<Description>JavaScript expression support for MongoDB.InMemoryEmulator. Uses Jint to execute $function, $accumulator, and $where expressions inside your in-memory tests.</Description>
 		<PackageTags>mongodb;mongo;testing;javascript;jint;in-memory;emulator</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageIcon>icon.svg</PackageIcon>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<None Include="..\..\README.md" Pack="true" PackagePath="" />
+		<None Include="..\..\icon.svg" Pack="true" PackagePath="" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -1,0 +1,24 @@
+services:
+  mongodb:
+    image: mongo:7.0.14
+    container_name: mongodb-test
+    ports:
+      - "27017:27017"
+    command: mongod --replSet rs0
+    healthcheck:
+      test: mongosh --quiet --eval "try { rs.status().ok } catch(e) { 0 }"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  mongodb-init:
+    image: mongo:7.0.14
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: >
+      mongosh --host mongodb --eval "
+        rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongodb:27017' }] })
+      "

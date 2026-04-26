@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<PackageId>MongoDB.InMemoryEmulator.JsTriggers</PackageId>
+		<Description>JavaScript expression support for MongoDB.InMemoryEmulator. Uses Jint to execute $function, $accumulator, and $where expressions inside your in-memory tests.</Description>
+		<PackageTags>mongodb;mongo;testing;javascript;jint;in-memory;emulator</PackageTags>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Jint" Version="4.2.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\MongoDB.InMemoryEmulator\MongoDB.InMemoryEmulator.csproj" />
+	</ItemGroup>
+
+</Project>

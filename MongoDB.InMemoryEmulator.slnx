@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MongoDB.InMemoryEmulator.JsTriggers/MongoDB.InMemoryEmulator.JsTriggers.csproj" />
+    <Project Path="src/MongoDB.InMemoryEmulator/MongoDB.InMemoryEmulator.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MongoDB.InMemoryEmulator.Tests.Integration/MongoDB.InMemoryEmulator.Tests.Integration.csproj" />
+    <Project Path="tests/MongoDB.InMemoryEmulator.Tests.Shared/MongoDB.InMemoryEmulator.Tests.Shared.csproj" />
+    <Project Path="tests/MongoDB.InMemoryEmulator.Tests.Unit/MongoDB.InMemoryEmulator.Tests.Unit.csproj" />
+  </Folder>
+</Solution>

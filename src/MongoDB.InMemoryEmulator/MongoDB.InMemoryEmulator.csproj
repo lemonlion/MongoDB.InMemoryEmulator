@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<PackageId>MongoDB.InMemoryEmulator</PackageId>
+		<Description>A high-fidelity, in-memory implementation of the MongoDB .NET Driver interfaces — purpose-built for fast, reliable component and integration testing. Drop-in replacements for IMongoClient, IMongoDatabase, and IMongoCollection&lt;T&gt; with full CRUD, filter evaluation, aggregation pipeline, change streams, transactions, LINQ, and DI integration. Zero production code changes required.</Description>
+		<PackageTags>mongodb;mongo;testing;in-memory;emulator;mock;fake;integration-testing;component-testing</PackageTags>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="MongoDB.InMemoryEmulator.Tests.Unit" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="MongoDB.Driver" Version="2.30.0" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+	</ItemGroup>
+
+</Project>

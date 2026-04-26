@@ -4,7 +4,12 @@
 		<PackageId>MongoDB.InMemoryEmulator.JsTriggers</PackageId>
 		<Description>JavaScript expression support for MongoDB.InMemoryEmulator. Uses Jint to execute $function, $accumulator, and $where expressions inside your in-memory tests.</Description>
 		<PackageTags>mongodb;mongo;testing;javascript;jint;in-memory;emulator</PackageTags>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\..\README.md" Pack="true" PackagePath="" />
+	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="Jint" Version="4.2.1" />

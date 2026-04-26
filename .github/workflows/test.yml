@@ -18,6 +18,8 @@ jobs:
       - run: dotnet test --configuration Release --logger "trx;LogFileName=results.trx"
         env:
           MONGO_TEST_TARGET: inmemory
+      - name: Check for vulnerable packages
+        run: dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt; ! grep -q "has the following vulnerable packages" vulnerability-report.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:

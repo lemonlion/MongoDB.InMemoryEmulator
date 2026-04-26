@@ -1,4 +1,4 @@
-# MongoDB.InMemoryEmulator
+# <img src="icon.svg" width="32" height="32" alt="MongoDB.InMemoryEmulator icon" style="vertical-align: middle;"> MongoDB.InMemoryEmulator
 
 [![NuGet](https://img.shields.io/nuget/v/MongoDB.InMemoryEmulator.svg)](https://www.nuget.org/packages/MongoDB.InMemoryEmulator/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

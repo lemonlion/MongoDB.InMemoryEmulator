@@ -62,6 +62,13 @@ internal static class AggregationPipelineExecutor
                 // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/geoNear/
                 //   "Returns documents ordered by proximity to a specified point."
                 "$geoNear" => ExecuteGeoNear(current, stageSpec.AsBsonDocument),
+                // Ref: https://www.mongodb.com/docs/atlas/atlas-search/query-syntax/
+                //   "$search performs full-text search on Atlas Search indexes."
+                "$search" => ExecuteSearch(current, stageSpec.AsBsonDocument),
+                "$searchMeta" => ExecuteSearchMeta(current, stageSpec.AsBsonDocument),
+                // Ref: https://www.mongodb.com/docs/atlas/atlas-vector-search/vector-search-stage/
+                //   "$vectorSearch returns documents based on vector similarity."
+                "$vectorSearch" => ExecuteVectorSearch(current, stageSpec.AsBsonDocument),
                 _ => throw new NotSupportedException($"Aggregation stage '{stageName}' is not supported.")
             };
         }
@@ -1606,6 +1613,118 @@ internal static class AggregationPipelineExecutor
             }
             return result;
         }).ToList();
+    }
+
+    #endregion
+
+    #region Search Stubs
+
+    // Ref: https://www.mongodb.com/docs/atlas/atlas-search/query-syntax/
+    //   "$search is only available for MongoDB Atlas. In-memory provides basic substring matching stub."
+    private static IEnumerable<BsonDocument> ExecuteSearch(IEnumerable<BsonDocument> input, BsonDocument spec)
+    {
+        // Extract search text from various search operator forms
+        string? searchText = null;
+        string? path = null;
+
+        if (spec.Contains("text"))
+        {
+            var textSpec = spec["text"].AsBsonDocument;
+            searchText = textSpec.Contains("query") ? textSpec["query"].AsString : null;
+            path = textSpec.Contains("path") ? textSpec["path"].AsString : null;
+        }
+        else if (spec.Contains("phrase"))
+        {
+            var phraseSpec = spec["phrase"].AsBsonDocument;
+            searchText = phraseSpec.Contains("query") ? phraseSpec["query"].AsString : null;
+            path = phraseSpec.Contains("path") ? phraseSpec["path"].AsString : null;
+        }
+        else if (spec.Contains("wildcard"))
+        {
+            var wildSpec = spec["wildcard"].AsBsonDocument;
+            searchText = wildSpec.Contains("query") ? wildSpec["query"].AsString : null;
+            path = wildSpec.Contains("path") ? wildSpec["path"].AsString : null;
+        }
+
+        if (searchText == null) return input;
+
+        var lower = searchText.ToLowerInvariant();
+        return input.Where(doc =>
+        {
+            if (path != null)
+            {
+                var val = BsonFilterEvaluator.ResolveFieldPath(doc, path);
+                return val.IsString && val.AsString.ToLowerInvariant().Contains(lower);
+            }
+            // Search all string fields
+            return doc.Elements.Any(e => e.Value.IsString && e.Value.AsString.ToLowerInvariant().Contains(lower));
+        }).Select(doc =>
+        {
+            var result = doc.DeepClone().AsBsonDocument;
+            result["score"] = new BsonDouble(1.0);
+            return result;
+        }).ToList();
+    }
+
+    // Ref: https://www.mongodb.com/docs/atlas/atlas-search/query-syntax/#-searchmeta
+    //   "$searchMeta returns metadata about Atlas Search results."
+    private static IEnumerable<BsonDocument> ExecuteSearchMeta(IEnumerable<BsonDocument> input, BsonDocument spec)
+    {
+        var count = input.Count();
+        return new List<BsonDocument>
+        {
+            new BsonDocument
+            {
+                { "count", new BsonDocument { { "lowerBound", count }, { "total", count } } }
+            }
+        };
+    }
+
+    // Ref: https://www.mongodb.com/docs/atlas/atlas-vector-search/vector-search-stage/
+    //   "Brute-force vector similarity search stub for in-memory emulator."
+    private static IEnumerable<BsonDocument> ExecuteVectorSearch(IEnumerable<BsonDocument> input, BsonDocument spec)
+    {
+        var queryVector = spec["queryVector"].AsBsonArray.Select(v => v.ToDouble()).ToArray();
+        var path = spec["path"].AsString;
+        var limit = spec.Contains("limit") ? spec["limit"].ToInt32() : 10;
+        var numCandidates = spec.Contains("numCandidates") ? spec["numCandidates"].ToInt32() : limit * 10;
+
+        var scored = new List<(BsonDocument doc, double score)>();
+        foreach (var doc in input)
+        {
+            var fieldValue = BsonFilterEvaluator.ResolveFieldPath(doc, path);
+            if (fieldValue is not BsonArray vecArray) continue;
+
+            var docVector = vecArray.Select(v => v.ToDouble()).ToArray();
+            if (docVector.Length != queryVector.Length) continue;
+
+            var similarity = CosineSimilarity(queryVector, docVector);
+            scored.Add((doc, similarity));
+        }
+
+        return scored
+            .OrderByDescending(s => s.score)
+            .Take(limit)
+            .Select(s =>
+            {
+                var result = s.doc.DeepClone().AsBsonDocument;
+                result["__vectorSearchScore"] = new BsonDouble(s.score);
+                return result;
+            })
+            .ToList();
+    }
+
+    private static double CosineSimilarity(double[] a, double[] b)
+    {
+        double dot = 0, magA = 0, magB = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            dot += a[i] * b[i];
+            magA += a[i] * a[i];
+            magB += b[i] * b[i];
+        }
+        var denom = Math.Sqrt(magA) * Math.Sqrt(magB);
+        return denom == 0 ? 0 : dot / denom;
     }
 
     #endregion

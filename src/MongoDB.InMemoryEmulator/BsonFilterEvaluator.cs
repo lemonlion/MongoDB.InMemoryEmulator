@@ -37,6 +37,10 @@ internal static class BsonFilterEvaluator
             "$or" => element.Value.AsBsonArray.Any(sub => Matches(document, sub.AsBsonDocument, variables)),
             "$nor" => !element.Value.AsBsonArray.Any(sub => Matches(document, sub.AsBsonDocument, variables)),
 
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/text/
+            //   "Performs text search on the content of the fields indexed with a text index."
+            "$text" => MatchesText(document, element.Value.AsBsonDocument),
+
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/expr/
             //   "Allows the use of aggregation expressions within the query language."
             "$expr" => AggregationExpressionEvaluator.IsTruthy(
@@ -385,5 +389,181 @@ internal static class BsonFilterEvaluator
             var dist = GeoJsonHelper.HaversineDistance(target, fieldPoint);
             return dist >= minDistance && dist <= maxDistance;
         }
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/text/
+    //   "{ $text: { $search: <string>, $language: <string>, $caseSensitive: <boolean>, $diacriticSensitive: <boolean> } }"
+    //   "Performs a text search on string fields that have a text index."
+    private static bool MatchesText(BsonDocument document, BsonDocument textSpec)
+    {
+        var searchStr = textSpec["$search"].AsString;
+        var caseSensitive = textSpec.GetValue("$caseSensitive", false).ToBoolean();
+
+        // Extract all string fields from the document
+        var allText = ExtractAllStringValues(document);
+        var textContent = string.Join(" ", allText);
+
+        if (!caseSensitive)
+            textContent = textContent.ToLowerInvariant();
+
+        // Parse search string: handle phrases (quoted), negation (- prefix), and terms
+        var (requiredTerms, requiredPhrases, negatedTerms) = ParseTextSearch(searchStr);
+
+        // Check negated terms first
+        foreach (var neg in negatedTerms)
+        {
+            var check = caseSensitive ? neg : neg.ToLowerInvariant();
+            if (textContent.Contains(check))
+                return false;
+        }
+
+        // If only negations, match all non-negated docs
+        if (requiredTerms.Count == 0 && requiredPhrases.Count == 0)
+            return true;
+
+        // Check phrases
+        foreach (var phrase in requiredPhrases)
+        {
+            var check = caseSensitive ? phrase : phrase.ToLowerInvariant();
+            if (!textContent.Contains(check))
+                return false;
+        }
+
+        // Check terms (OR logic for individual terms)
+        if (requiredTerms.Count > 0)
+        {
+            return requiredTerms.Any(term =>
+            {
+                var check = caseSensitive ? term : term.ToLowerInvariant();
+                return textContent.Contains(check);
+            });
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Calculates a simple text relevance score for a document against a search string.
+    /// Used for $meta: "textScore" projections.
+    /// </summary>
+    internal static double CalculateTextScore(BsonDocument document, string searchStr)
+    {
+        var allText = ExtractAllStringValues(document);
+        var textContent = string.Join(" ", allText).ToLowerInvariant();
+        var (terms, phrases, _) = ParseTextSearch(searchStr);
+
+        double score = 0;
+        foreach (var term in terms)
+        {
+            var lower = term.ToLowerInvariant();
+            int idx = 0;
+            while ((idx = textContent.IndexOf(lower, idx, StringComparison.Ordinal)) >= 0)
+            {
+                score += 1.0;
+                idx += lower.Length;
+            }
+        }
+        foreach (var phrase in phrases)
+        {
+            var lower = phrase.ToLowerInvariant();
+            if (textContent.Contains(lower))
+                score += 5.0; // Phrase matches score higher
+        }
+
+        return score;
+    }
+
+    private static List<string> ExtractAllStringValues(BsonDocument doc)
+    {
+        var results = new List<string>();
+        foreach (var element in doc)
+        {
+            if (element.Name.StartsWith("_")) continue; // Skip system fields
+            if (element.Value.IsString)
+                results.Add(element.Value.AsString);
+            else if (element.Value is BsonDocument nested)
+                results.AddRange(ExtractAllStringValues(nested));
+            else if (element.Value is BsonArray arr)
+            {
+                foreach (var item in arr)
+                {
+                    if (item.IsString)
+                        results.Add(item.AsString);
+                    else if (item is BsonDocument nestedDoc)
+                        results.AddRange(ExtractAllStringValues(nestedDoc));
+                }
+            }
+        }
+        return results;
+    }
+
+    private static (List<string> terms, List<string> phrases, List<string> negated) ParseTextSearch(string search)
+    {
+        var terms = new List<string>();
+        var phrases = new List<string>();
+        var negated = new List<string>();
+
+        bool inQuote = false;
+        var current = new System.Text.StringBuilder();
+        bool isNegated = false;
+
+        for (int i = 0; i < search.Length; i++)
+        {
+            var c = search[i];
+            if (c == '"')
+            {
+                if (inQuote)
+                {
+                    // End of phrase
+                    var phrase = current.ToString();
+                    if (phrase.Length > 0)
+                    {
+                        if (isNegated)
+                            negated.Add(phrase);
+                        else
+                            phrases.Add(phrase);
+                    }
+                    current.Clear();
+                    isNegated = false;
+                    inQuote = false;
+                }
+                else
+                {
+                    inQuote = true;
+                }
+            }
+            else if (c == ' ' && !inQuote)
+            {
+                if (current.Length > 0)
+                {
+                    var word = current.ToString();
+                    if (isNegated)
+                        negated.Add(word);
+                    else
+                        terms.Add(word);
+                    current.Clear();
+                    isNegated = false;
+                }
+            }
+            else if (c == '-' && current.Length == 0 && !inQuote)
+            {
+                isNegated = true;
+            }
+            else
+            {
+                current.Append(c);
+            }
+        }
+
+        if (current.Length > 0)
+        {
+            var word = current.ToString();
+            if (isNegated)
+                negated.Add(word);
+            else
+                terms.Add(word);
+        }
+
+        return (terms, phrases, negated);
     }
 }

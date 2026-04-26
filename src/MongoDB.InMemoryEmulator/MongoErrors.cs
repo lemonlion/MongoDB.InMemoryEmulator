@@ -75,6 +75,23 @@ internal static class MongoErrors
     }
 
     /// <summary>
+    /// E11000 duplicate key error for a secondary (non-_id) unique index.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/error-codes/
+    ///   "E11000 duplicate key error collection: {ns} index: {indexName} dup key: {keyValue}"
+    /// </remarks>
+    internal static MongoWriteException DuplicateKeyIndex(string indexName, string keyDescription)
+    {
+        var writeError = CreateWriteError(
+            ServerErrorCategory.DuplicateKey,
+            11000,
+            $"E11000 duplicate key error index: {indexName} dup key: {{ {keyDescription} }}");
+
+        return new MongoWriteException(SyntheticConnectionId, writeError, writeConcernError: null, innerException: null);
+    }
+
+    /// <summary>
     /// Error code 66 — ImmutableField.
     /// </summary>
     /// <remarks>

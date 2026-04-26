@@ -89,6 +89,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         cancellationToken.ThrowIfCancellationRequested();
         var bson = SerializeDocument(document);
         FaultInjector?.Invoke("insert", bson);
+        DocumentStore.EnsureId(bson);
+        _indexManager.ValidateDocument(bson);
         _store.Insert(bson);
         OperationLog.Record(new OperationRecord { Type = "InsertOne", Document = bson.DeepClone().AsBsonDocument });
 
@@ -137,6 +139,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             try
             {
                 var bson = SerializeDocument(docList[i]);
+                DocumentStore.EnsureId(bson);
+                _indexManager.ValidateDocument(bson);
                 _store.Insert(bson);
                 WriteBackId(docList[i], bson);
             }
@@ -437,6 +441,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         {
             if (options?.IsUpsert == true)
             {
+                DocumentStore.EnsureId(replacementBson);
+                _indexManager.ValidateDocument(replacementBson);
                 var doc = _store.Insert(replacementBson);
                 var upsertedId = doc["_id"];
                 return new ReplaceOneResult.Acknowledged(0, 0, upsertedId);
@@ -454,6 +460,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             throw MongoErrors.ImmutableField("_id");
 
         replacementBson["_id"] = targetId;
+        _indexManager.ValidateDocument(replacementBson, excludeId: targetId);
         var beforeChange = target.DeepClone().AsBsonDocument;
         var replaced = _store.Replace(targetId, replacementBson);
 
@@ -511,7 +518,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 var upsertDoc = updateBson is BsonArray
                     ? CreateUpsertDocumentFromFilter(filter)
                     : CreateUpsertDocument(filter, updateBson.AsBsonDocument);
-                var inserted = _store.Insert(ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true));
+                var upsertResult = ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true);
+                DocumentStore.EnsureId(upsertResult);
+                _indexManager.ValidateDocument(upsertResult);
+                var inserted = _store.Insert(upsertResult);
                 return new UpdateResult.Acknowledged(0, 0, inserted["_id"]);
             }
             return new UpdateResult.Acknowledged(0, 0, null);
@@ -519,6 +529,11 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         var target = matches[0];
         var targetId = target["_id"];
+
+        // Pre-validate: compute the updated doc and check unique indexes before committing
+        var previewDoc = ApplyUpdate(target.DeepClone().AsBsonDocument, updateBson, isUpsertInsert: false);
+        previewDoc["_id"] = targetId;
+        _indexManager.ValidateDocument(previewDoc, excludeId: targetId);
 
         // Use DocumentStore.Update for atomic apply — prevents lost updates under concurrency
         var (matched, modified, beforeChange) = _store.Update(targetId, currentDoc =>
@@ -560,7 +575,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 var upsertDoc = updateBson is BsonArray
                     ? CreateUpsertDocumentFromFilter(filter)
                     : CreateUpsertDocument(filter, updateBson.AsBsonDocument);
-                var inserted = _store.Insert(ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true));
+                var upsertResult = ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true);
+                DocumentStore.EnsureId(upsertResult);
+                _indexManager.ValidateDocument(upsertResult);
+                var inserted = _store.Insert(upsertResult);
                 return new UpdateResult.Acknowledged(0, 0, inserted["_id"]);
             }
             return new UpdateResult.Acknowledged(0, 0, null);
@@ -572,6 +590,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             var targetId = target["_id"];
             var updated = ApplyUpdate(target, updateBson, isUpsertInsert: false);
             updated["_id"] = targetId;
+            _indexManager.ValidateDocument(updated, excludeId: targetId);
             if (_store.Replace(targetId, updated))
                 modifiedCount++;
         }
@@ -665,6 +684,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         {
             if (options?.IsUpsert == true)
             {
+                DocumentStore.EnsureId(replacementBson);
+                _indexManager.ValidateDocument(replacementBson);
                 var doc = _store.Insert(replacementBson);
                 if (options.ReturnDocument == ReturnDocument.After)
                 {
@@ -687,6 +708,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             throw MongoErrors.ImmutableField("_id");
 
         replacementBson["_id"] = targetId;
+        _indexManager.ValidateDocument(replacementBson, excludeId: targetId);
         _store.Replace(targetId, replacementBson);
 
         // Ref: https://www.mongodb.com/docs/manual/reference/command/findAndModify/
@@ -741,7 +763,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 var upsertDoc = updateBson is BsonArray
                     ? CreateUpsertDocumentFromFilter(filter)
                     : CreateUpsertDocument(filter, updateBson.AsBsonDocument);
-                var inserted = _store.Insert(ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true));
+                var upsertResult = ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true);
+                DocumentStore.EnsureId(upsertResult);
+                _indexManager.ValidateDocument(upsertResult);
+                var inserted = _store.Insert(upsertResult);
                 if (options.ReturnDocument == ReturnDocument.After)
                 {
                     var afterResult = ApplyProjectionIfNeeded(inserted, options.Projection);
@@ -756,6 +781,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         var targetId = target["_id"];
         var updated = ApplyUpdate(target, updateBson);
         updated["_id"] = targetId;
+        _indexManager.ValidateDocument(updated, excludeId: targetId);
         _store.Replace(targetId, updated);
 
         var resultDoc = options?.ReturnDocument == ReturnDocument.After ? updated : target;
@@ -1102,6 +1128,21 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
     #region Internal helpers
 
+    /// <summary>
+    /// Removes TTL-expired documents from the store (lazy eviction on read).
+    /// </summary>
+    private void EvictTtlExpiredDocuments()
+    {
+        var allDocs = _store.GetAll();
+        foreach (var doc in allDocs)
+        {
+            if (_indexManager.IsExpiredByTtl(doc) && doc.Contains("_id"))
+            {
+                _store.Remove(doc["_id"]);
+            }
+        }
+    }
+
     private BsonDocument SerializeDocument(TDocument document)
     {
         return document switch
@@ -1181,10 +1222,19 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     }
 
     /// <summary>
-    /// Gets documents from the store, applying the view pipeline if this collection is backed by a view.
+    /// Gets documents from the store, applying TTL eviction and the view pipeline if applicable.
     /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/core/index-ttl/#expiration-of-data
+    ///   "TTL indexes expire documents after the specified number of seconds has passed
+    ///    since the indexed field value."
+    /// Lazy eviction: expired documents are removed from the store on query.
+    /// </remarks>
     private IReadOnlyList<BsonDocument> GetStoreDocuments()
     {
+        // TTL lazy eviction: remove expired docs from the store on read
+        EvictTtlExpiredDocuments();
+
         var allDocs = _store.GetAll();
         if (_viewPipeline == null || _viewPipeline.Count == 0) return allDocs;
 

@@ -18,7 +18,7 @@ jobs:
         env:
           MONGO_TEST_TARGET: atlas
           MONGO_CONNECTION_STRING: ${{ secrets.ATLAS_CONNECTION_STRING }}
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: weekly-atlas-parity-results
@@ -47,7 +47,7 @@ jobs:
         env:
           MONGO_TEST_TARGET: mongodb
           MONGO_CONNECTION_STRING: "mongodb://localhost:27017/?replicaSet=rs0&directConnection=true"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: latest-mongo-compat-results

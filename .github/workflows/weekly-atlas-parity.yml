@@ -10,15 +10,15 @@ jobs:
     name: Tests (MongoDB Atlas)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
       - run: dotnet test --configuration Release --filter "Target!=InMemoryOnly" --logger "trx;LogFileName=results.trx"
         env:
           MONGO_TEST_TARGET: atlas
           MONGO_CONNECTION_STRING: ${{ secrets.ATLAS_CONNECTION_STRING }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: weekly-atlas-parity-results
@@ -28,8 +28,8 @@ jobs:
     name: Tests (Latest MongoDB)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
       - name: Start MongoDB with replica set
@@ -47,7 +47,7 @@ jobs:
         env:
           MONGO_TEST_TARGET: mongodb
           MONGO_CONNECTION_STRING: "mongodb://localhost:27017/?replicaSet=rs0&directConnection=true"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: latest-mongo-compat-results

@@ -216,4 +216,133 @@ public class RunCommandTests : IAsyncLifetime
                 new BsonDocument("unknownCommand", 1)));
         Assert.Contains("no such command", ex.Message);
     }
+
+    [Fact]
+    [Trait(TestTraits.Target, TestTraits.All)]
+    public void Hello_returns_writable_standalone()
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/hello/
+        //   "hello returns a document that describes the role of the mongod instance."
+        var result = _fixture.Database.RunCommand<BsonDocument>(new BsonDocument("hello", 1));
+        result["ok"].ToInt32().Should().Be(1);
+        result["isWritablePrimary"].AsBoolean.Should().BeTrue();
+        result.Contains("maxBsonObjectSize").Should().BeTrue();
+        result.Contains("maxMessageSizeBytes").Should().BeTrue();
+        result.Contains("maxWriteBatchSize").Should().BeTrue();
+        result.Contains("localTime").Should().BeTrue();
+        result.Contains("minWireVersion").Should().BeTrue();
+        result.Contains("maxWireVersion").Should().BeTrue();
+        result["readOnly"].AsBoolean.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait(TestTraits.Target, TestTraits.All)]
+    public void IsMaster_returns_writable_standalone()
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/isMaster/
+        //   "isMaster returns a document that describes the role of the mongod instance."
+        var result = _fixture.Database.RunCommand<BsonDocument>(new BsonDocument("isMaster", 1));
+        result["ok"].ToInt32().Should().Be(1);
+        result["ismaster"].AsBoolean.Should().BeTrue();
+        result.Contains("maxBsonObjectSize").Should().BeTrue();
+        result.Contains("maxWriteBatchSize").Should().BeTrue();
+    }
+
+    [Fact]
+    [Trait(TestTraits.Target, TestTraits.All)]
+    public void Ismaster_lowercase_also_works()
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/isMaster/
+        //   Driver sends "ismaster" (lowercase) in some versions.
+        var result = _fixture.Database.RunCommand<BsonDocument>(new BsonDocument("ismaster", 1));
+        result["ok"].ToInt32().Should().Be(1);
+        result["ismaster"].AsBoolean.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CurrentOp_returns_empty_inprog()
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/currentOp/
+        //   "Returns a document that contains information on in-progress operations."
+        var result = _fixture.Database.RunCommand<BsonDocument>(new BsonDocument("currentOp", 1));
+        result["ok"].ToInt32().Should().Be(1);
+        result["inprog"].AsBsonArray.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CollMod_updates_validator()
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/collMod/
+        //   "collMod makes it possible to add options to a collection or to modify view definitions."
+        var collName = "rc_collmod_validator";
+        _fixture.Database.CreateCollection(collName);
+
+        var validator = new BsonDocument("$jsonSchema", new BsonDocument
+        {
+            { "bsonType", "object" },
+            { "required", new BsonArray { "name" } }
+        });
+
+        var result = _fixture.Database.RunCommand<BsonDocument>(new BsonDocument
+        {
+            { "collMod", collName },
+            { "validator", validator },
+            { "validationAction", "error" },
+            { "validationLevel", "strict" }
+        });
+        result["ok"].ToInt32().Should().Be(1);
+
+        // Validator should now reject docs without "name"
+        var collection = _fixture.GetCollection<BsonDocument>(collName);
+        await collection.InsertOneAsync(new BsonDocument("name", "Alice"));
+
+        var ex = await Assert.ThrowsAsync<MongoWriteException>(async () =>
+            await collection.InsertOneAsync(new BsonDocument("age", 30)));
+        ex.Message.Should().Contain("validation");
+    }
+
+    [Fact]
+    public async Task CollMod_updates_validationAction_to_warn()
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/collMod/
+        //   "validationAction: 'warn' logs a warning but allows the write."
+        var collName = "rc_collmod_warn";
+
+        // Create with strict validator via RunCommand
+        _fixture.Database.RunCommand<BsonDocument>(new BsonDocument
+        {
+            { "create", collName },
+            { "validator", new BsonDocument("$jsonSchema", new BsonDocument
+                {
+                    { "bsonType", "object" },
+                    { "required", new BsonArray { "name" } }
+                })
+            },
+            { "validationAction", "error" }
+        });
+
+        // Downgrade to warn
+        _fixture.Database.RunCommand<BsonDocument>(new BsonDocument
+        {
+            { "collMod", collName },
+            { "validationAction", "warn" }
+        });
+
+        // Should succeed now (warn instead of error)
+        var collection = _fixture.GetCollection<BsonDocument>(collName);
+        await collection.InsertOneAsync(new BsonDocument("age", 30));
+        var count = await collection.CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty);
+        count.Should().Be(1);
+    }
+
+    [Fact]
+    public void CollMod_on_nonexistent_collection_throws()
+    {
+        var ex = Assert.Throws<MongoCommandException>(() =>
+            _fixture.Database.RunCommand<BsonDocument>(new BsonDocument
+            {
+                { "collMod", "rc_does_not_exist" }
+            }));
+        ex.Message.Should().Contain("not found");
+    }
 }

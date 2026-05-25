@@ -444,6 +444,46 @@ public class InMemoryMongoDatabase : IMongoDatabase
             "drop" => HandleDrop(firstElement.Value.AsString),
             "createindexes" or "dropindexes" => new BsonDocument("ok", 1), // Index stubs
             "aggregate" => HandleAggregate(cmd),
+            // Ref: https://www.mongodb.com/docs/manual/reference/command/hello/
+            //   "hello returns a document that describes the role of the mongod instance."
+            "hello" => new BsonDocument
+            {
+                { "isWritablePrimary", true },
+                { "maxBsonObjectSize", 16 * 1024 * 1024 },
+                { "maxMessageSizeBytes", 48_000_000 },
+                { "maxWriteBatchSize", 100_000 },
+                { "localTime", DateTime.UtcNow },
+                { "connectionId", 1 },
+                { "minWireVersion", 0 },
+                { "maxWireVersion", 21 },
+                { "readOnly", false },
+                { "ok", 1 }
+            },
+            // Ref: https://www.mongodb.com/docs/manual/reference/command/isMaster/
+            //   "isMaster is an alias for hello; returns the same document."
+            "ismaster" => new BsonDocument
+            {
+                { "ismaster", true },
+                { "maxBsonObjectSize", 16 * 1024 * 1024 },
+                { "maxMessageSizeBytes", 48_000_000 },
+                { "maxWriteBatchSize", 100_000 },
+                { "localTime", DateTime.UtcNow },
+                { "connectionId", 1 },
+                { "minWireVersion", 0 },
+                { "maxWireVersion", 21 },
+                { "readOnly", false },
+                { "ok", 1 }
+            },
+            // Ref: https://www.mongodb.com/docs/manual/reference/command/currentOp/
+            //   "Returns a document that contains information on in-progress operations."
+            "currentop" => new BsonDocument
+            {
+                { "inprog", new BsonArray() },
+                { "ok", 1 }
+            },
+            // Ref: https://www.mongodb.com/docs/manual/reference/command/collMod/
+            //   "collMod makes it possible to add options to a collection or modify view definitions."
+            "collmod" => HandleCollMod(cmd),
             // Ref: https://www.mongodb.com/docs/manual/reference/command/explain/
             //   "Returns information on the execution of various operations."
             "explain" => HandleExplain(cmd),
@@ -600,6 +640,61 @@ public class InMemoryMongoDatabase : IMongoDatabase
         _validators.TryRemove(collectionName, out _);
         _timeSeriesOptions.TryRemove(collectionName, out _);
         return new BsonDocument("ok", 1);
+    }
+
+    private BsonDocument HandleCollMod(BsonDocument cmd)
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/collMod/
+        //   "collMod makes it possible to add options to a collection or modify view definitions."
+        var collName = cmd.GetElement(0).Value.AsString;
+
+        if (GetStore(collName) == null && !_views.ContainsKey(collName))
+        {
+            throw new MongoCommandException(
+                MongoErrors.SyntheticConnectionId,
+                $"ns not found: {DatabaseNamespace.DatabaseName}.{collName}",
+                new BsonDocument { { "ok", 0 }, { "errmsg", $"ns not found" }, { "code", 26 }, { "codeName", "NamespaceNotFound" } });
+        }
+
+        var result = new BsonDocument();
+
+        if (cmd.Contains("validator") || cmd.Contains("validationAction") || cmd.Contains("validationLevel"))
+        {
+            _validators.TryGetValue(collName, out var existing);
+
+            var validator = cmd.Contains("validator") ? cmd["validator"].AsBsonDocument : existing?.Validator;
+            var action = cmd.Contains("validationAction") ? cmd["validationAction"].AsString : existing?.Action ?? "error";
+            var level = cmd.Contains("validationLevel") ? cmd["validationLevel"].AsString : existing?.Level ?? "strict";
+
+            if (validator != null)
+                _validators[collName] = new SchemaValidation(validator, action, level);
+        }
+
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/collMod/#index
+        //   "collMod can modify index options such as expireAfterSeconds."
+        if (cmd.Contains("index") && cmd["index"] is BsonDocument indexMod && indexMod.Contains("expireAfterSeconds"))
+        {
+            var newTtl = indexMod["expireAfterSeconds"].ToInt32();
+            var store = GetStore(collName);
+            if (store != null)
+            {
+                var indexManager = new InMemoryIndexManager<BsonDocument>(
+                    GetCollection<BsonDocument>(collName), store);
+                var indexes = indexManager.List().ToList();
+                foreach (var idx in indexes)
+                {
+                    if (idx.Contains("expireAfterSeconds"))
+                    {
+                        result["expireAfterSeconds_old"] = idx["expireAfterSeconds"];
+                        idx["expireAfterSeconds"] = newTtl;
+                        result["expireAfterSeconds_new"] = newTtl;
+                    }
+                }
+            }
+        }
+
+        result["ok"] = 1;
+        return result;
     }
 
     private BsonDocument HandleAggregate(BsonDocument cmd)

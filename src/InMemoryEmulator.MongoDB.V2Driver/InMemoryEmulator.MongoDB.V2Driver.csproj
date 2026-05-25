@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<PackageId>InMemoryEmulator.MongoDB.V2Driver</PackageId>
+		<RootNamespace>InMemoryEmulator.MongoDB</RootNamespace>
+		<Description>A high-fidelity, in-memory implementation of the MongoDB .NET Driver 2.x interfaces — purpose-built for fast, reliable component and integration testing. Drop-in replacements for IMongoClient, IMongoDatabase, and IMongoCollection&lt;T&gt; with full CRUD, filter evaluation, aggregation pipeline, change streams, transactions, LINQ, and DI integration. Zero production code changes required.</Description>
+		<PackageTags>mongodb;mongo;testing;in-memory;emulator;mock;fake;integration-testing;component-testing;v2driver</PackageTags>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageIcon>icon.png</PackageIcon>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\..\README.md" Pack="true" PackagePath="" />
+		<None Include="..\..\icon.png" Pack="true" PackagePath="" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Compile Include="..\InMemoryEmulator.MongoDB.Shared\**\*.cs" LinkBase="Shared" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="MongoDB.Driver" Version="2.30.0" />
+		<PackageReference Include="MongoDB.Driver.GridFS" Version="2.30.0" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+		<PackageReference Include="NetTopologySuite" Version="2.5.0" />
+	</ItemGroup>
+
+</Project>

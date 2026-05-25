@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<PackageReference Include="AwesomeAssertions" Version="9.4.0" />
+		<PackageReference Include="MongoDB.Driver" Version="2.30.0" />
+		<PackageReference Include="xunit.v3.extensibility.core" Version="3.2.2" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\InMemoryEmulator.MongoDB.V2Driver\InMemoryEmulator.MongoDB.V2Driver.csproj" />
+	</ItemGroup>
+</Project>

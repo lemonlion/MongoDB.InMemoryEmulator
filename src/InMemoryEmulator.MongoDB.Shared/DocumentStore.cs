@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using global::MongoDB.Bson;
-using global::MongoDB.Driver;
 
 namespace InMemoryEmulator.MongoDB;
 
@@ -238,10 +237,7 @@ internal class DocumentStore
         //   "You cannot delete documents from a capped collection."
         if (IsCapped)
         {
-            throw new MongoCommandException(
-                MongoErrors.SyntheticConnectionId,
-                "cannot remove from a capped collection",
-                new BsonDocument("ok", 0));
+            throw MongoErrors.CannotRemoveFromCapped();
         }
 
         if (!_documents.TryRemove(id, out var removed))
@@ -383,10 +379,7 @@ internal class DocumentStore
         var size = doc.ToBson().Length;
         if (size > MaxDocumentSizeBytes)
         {
-            throw new global::MongoDB.Driver.MongoCommandException(
-                null!,
-                $"Document exceeds maximum size of {MaxDocumentSizeBytes} bytes (actual: {size})",
-                new BsonDocument("ok", 0));
+            throw MongoErrors.DocumentTooLarge(size, MaxDocumentSizeBytes);
         }
     }
 

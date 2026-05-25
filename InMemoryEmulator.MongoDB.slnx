@@ -2,10 +2,13 @@
   <Folder Name="/src/">
     <Project Path="src/InMemoryEmulator.MongoDB.JsTriggers/InMemoryEmulator.MongoDB.JsTriggers.csproj" />
     <Project Path="src/InMemoryEmulator.MongoDB/InMemoryEmulator.MongoDB.csproj" />
+    <Project Path="src/InMemoryEmulator.MongoDB.V2Driver/InMemoryEmulator.MongoDB.V2Driver.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/InMemoryEmulator.MongoDB.Tests.Integration/InMemoryEmulator.MongoDB.Tests.Integration.csproj" />
     <Project Path="tests/InMemoryEmulator.MongoDB.Tests.Shared/InMemoryEmulator.MongoDB.Tests.Shared.csproj" />
     <Project Path="tests/InMemoryEmulator.MongoDB.Tests.Unit/InMemoryEmulator.MongoDB.Tests.Unit.csproj" />
+    <Project Path="tests/InMemoryEmulator.MongoDB.V2Driver.Tests.Integration/InMemoryEmulator.MongoDB.V2Driver.Tests.Integration.csproj" />
+    <Project Path="tests/InMemoryEmulator.MongoDB.V2Driver.Tests.Shared/InMemoryEmulator.MongoDB.V2Driver.Tests.Shared.csproj" />
   </Folder>
 </Solution>

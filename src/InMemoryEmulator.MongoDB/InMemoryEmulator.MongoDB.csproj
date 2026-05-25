@@ -14,6 +14,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<Compile Include="..\InMemoryEmulator.MongoDB.Shared\**\*.cs" LinkBase="Shared" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<InternalsVisibleTo Include="InMemoryEmulator.MongoDB.Tests.Unit" />
 		<InternalsVisibleTo Include="InMemoryEmulator.MongoDB.JsTriggers" />
 	</ItemGroup>

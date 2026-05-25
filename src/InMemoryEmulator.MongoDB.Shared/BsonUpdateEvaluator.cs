@@ -1,6 +1,4 @@
 using global::MongoDB.Bson;
-using global::MongoDB.Driver;
-using global::MongoDB.Driver.Core.Connections;
 
 namespace InMemoryEmulator.MongoDB;
 
@@ -308,11 +306,7 @@ internal static class BsonUpdateEvaluator
             //   "$rename does not work if these fields are in array elements."
             //   MongoDB errors with "The source field for $rename may not be dynamic"
             if (PathTraversesArray(doc, oldName) || PathTraversesArray(doc, newName))
-                throw new MongoWriteException(
-                    MongoErrors.SyntheticConnectionId,
-                    MongoErrors.CreateWriteError(ServerErrorCategory.Uncategorized, 2,
-                        $"The source field for $rename may not traverse an array element: {oldName}"),
-                    null, null);
+                throw MongoErrors.RenameTraversesArray(oldName);
 
             if (BsonFilterEvaluator.FieldExists(doc, oldName))
             {

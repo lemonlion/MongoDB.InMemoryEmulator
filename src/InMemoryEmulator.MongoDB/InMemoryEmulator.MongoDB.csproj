@@ -18,8 +18,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<InternalsVisibleTo Include="InMemoryEmulator.MongoDB.Tests.Unit" />
-		<InternalsVisibleTo Include="InMemoryEmulator.MongoDB.JsTriggers" />
+<InternalsVisibleTo Include="InMemoryEmulator.MongoDB.JsTriggers" />
 	</ItemGroup>
 
 	<ItemGroup>

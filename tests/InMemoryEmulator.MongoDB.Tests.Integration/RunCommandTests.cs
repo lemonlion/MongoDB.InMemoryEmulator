@@ -260,6 +260,7 @@ public class RunCommandTests : IAsyncLifetime
     }
 
     [Fact]
+    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
     public void CurrentOp_returns_empty_inprog()
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/command/currentOp/
@@ -343,6 +344,18 @@ public class RunCommandTests : IAsyncLifetime
             {
                 { "collMod", "rc_does_not_exist" }
             }));
-        ex.Message.Should().Contain("not found");
+        ex.Message.Should().Contain("ns");
+    }
+
+    [Fact]
+    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    public void CollMod_on_nonexistent_collection_error_message_matches_mongo()
+    {
+        var ex = Assert.Throws<MongoCommandException>(() =>
+            _fixture.Database.RunCommand<BsonDocument>(new BsonDocument
+            {
+                { "collMod", "rc_does_not_exist_2" }
+            }));
+        ex.Message.Should().Contain("ns does not exist");
     }
 }

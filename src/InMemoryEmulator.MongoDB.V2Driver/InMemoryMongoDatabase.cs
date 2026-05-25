@@ -650,10 +650,12 @@ public class InMemoryMongoDatabase : IMongoDatabase
 
         if (GetStore(collName) == null && !_views.ContainsKey(collName))
         {
+            // Ref: https://www.mongodb.com/docs/manual/reference/command/collMod/
+            //   Real MongoDB returns "ns does not exist" for unknown collections.
             throw new MongoCommandException(
                 MongoErrors.SyntheticConnectionId,
-                $"ns not found: {DatabaseNamespace.DatabaseName}.{collName}",
-                new BsonDocument { { "ok", 0 }, { "errmsg", $"ns not found" }, { "code", 26 }, { "codeName", "NamespaceNotFound" } });
+                $"ns does not exist: {DatabaseNamespace.DatabaseName}.{collName}",
+                new BsonDocument { { "ok", 0 }, { "errmsg", $"ns does not exist" }, { "code", 26 }, { "codeName", "NamespaceNotFound" } });
         }
 
         var result = new BsonDocument();

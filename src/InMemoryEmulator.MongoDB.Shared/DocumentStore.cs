@@ -77,19 +77,17 @@ internal class DocumentStore
     /// Gets a snapshot of all documents.
     /// For capped collections, returns documents in insertion order.
     /// </summary>
+    // Ref: https://www.mongodb.com/docs/manual/reference/glossary/#std-term-natural-order
+    //   "The order in which the database stores documents on disk. Typically insertion order."
     internal IReadOnlyList<BsonDocument> GetAll()
     {
-        if (IsCapped)
+        lock (_cappedLock)
         {
-            lock (_cappedLock)
-            {
-                return _insertionOrder
-                    .Where(id => _documents.ContainsKey(id))
-                    .Select(id => _documents[id].DeepClone().AsBsonDocument)
-                    .ToList();
-            }
+            return _insertionOrder
+                .Where(id => _documents.ContainsKey(id))
+                .Select(id => _documents[id].DeepClone().AsBsonDocument)
+                .ToList();
         }
-        return _documents.Values.Select(d => d.DeepClone().AsBsonDocument).ToList();
     }
 
     /// <summary>

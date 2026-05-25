@@ -23,7 +23,7 @@ jobs:
           dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt
           # SharpCompress and Snappier are transitive deps from MongoDB.Driver with no patched versions; unused by this project
           ! grep -v 'SharpCompress' vulnerability-report.txt | grep -v 'Snappier' | grep -q '> '
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-inmemory
@@ -52,7 +52,7 @@ jobs:
         env:
           MONGO_TEST_TARGET: mongodb
           MONGO_CONNECTION_STRING: "mongodb://localhost:27017/?replicaSet=rs0&directConnection=true"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-mongodb

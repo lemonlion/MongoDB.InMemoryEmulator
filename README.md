@@ -15,7 +15,8 @@ A high-fidelity, in-process fake for the **MongoDB .NET/C# Driver** — zero Doc
 ## Quick Start
 
 ```
-dotnet add package InMemoryEmulator.MongoDB
+dotnet add package InMemoryEmulator.MongoDB          # for MongoDB.Driver 3.x
+dotnet add package InMemoryEmulator.MongoDB.V2Driver  # for MongoDB.Driver 2.x
 ```
 
 ### Unit Tests
@@ -58,10 +59,13 @@ services.UseInMemoryMongoDB(options =>
 
 ## NuGet Packages
 
-| Framework | Package | Description | NuGet |
-|---|---|---|---|
-| **Core library** | `InMemoryEmulator.MongoDB` | Primary features | [![NuGet Version](https://img.shields.io/nuget/v/InMemoryEmulator.MongoDB)](https://www.nuget.org/packages/InMemoryEmulator.MongoDB) |
-| **JavaScript Triggers** | `InMemoryEmulator.MongoDB.JsTriggers` | `$function`, `$accumulator`, `$where` via Jint | [![NuGet Version](https://img.shields.io/nuget/v/InMemoryEmulator.MongoDB.JsTriggers)](https://www.nuget.org/packages/InMemoryEmulator.MongoDB.JsTriggers) |
+| Package | Description | NuGet |
+|---|---|---|
+| `InMemoryEmulator.MongoDB` | Core library for **MongoDB.Driver 3.x** | [![NuGet Version](https://img.shields.io/nuget/v/InMemoryEmulator.MongoDB)](https://www.nuget.org/packages/InMemoryEmulator.MongoDB) |
+| `InMemoryEmulator.MongoDB.V2Driver` | Core library for **MongoDB.Driver 2.x** | [![NuGet Version](https://img.shields.io/nuget/v/InMemoryEmulator.MongoDB.V2Driver)](https://www.nuget.org/packages/InMemoryEmulator.MongoDB.V2Driver) |
+| `InMemoryEmulator.MongoDB.JsTriggers` | `$function`, `$accumulator`, `$where` via Jint | [![NuGet Version](https://img.shields.io/nuget/v/InMemoryEmulator.MongoDB.JsTriggers)](https://www.nuget.org/packages/InMemoryEmulator.MongoDB.JsTriggers) |
+
+> Both packages share the same namespace (`InMemoryEmulator.MongoDB`) and feature set. Pick the one matching your driver version — the API is identical.
 
 ## Documentation
 
@@ -78,7 +82,8 @@ See the [Wiki](https://github.com/lemonlion/InMemoryEmulator.MongoDB/wiki) for f
 ## Requirements
 
 - .NET 8.0+
-- MongoDB.Driver 2.28.0+
+- `InMemoryEmulator.MongoDB` requires MongoDB.Driver **3.x** (tested up to 3.8.1)
+- `InMemoryEmulator.MongoDB.V2Driver` requires MongoDB.Driver **2.x** (tested up to 2.30.0)
 
 ## License
 

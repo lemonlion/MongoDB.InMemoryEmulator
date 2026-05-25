@@ -21,8 +21,8 @@ jobs:
       - name: Check for vulnerable packages
         run: |
           dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt
-          # SharpCompress (GHSA-6c8g-7p36-r338) has no patched version; transitive dep from MongoDB.Driver, unused by this project
-          ! grep -v 'SharpCompress' vulnerability-report.txt | grep -q '> '
+          # SharpCompress and Snappier are transitive deps from MongoDB.Driver with no patched versions; unused by this project
+          ! grep -v 'SharpCompress' vulnerability-report.txt | grep -v 'Snappier' | grep -q '> '
       - uses: actions/upload-artifact@v5
         if: always()
         with:

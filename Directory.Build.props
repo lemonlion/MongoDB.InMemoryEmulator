@@ -7,10 +7,10 @@
 		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 	</PropertyGroup>
 
-	<!-- Suppress SharpCompress advisory (transitive dep from MongoDB.Driver).
-	     No patched version exists (all <= 0.47.4 affected).
-	     This project never calls SharpCompress WriteToDirectory. -->
+	<!-- Suppress transitive dep advisories from MongoDB.Driver where no patched version exists
+	     and this project never calls the affected APIs. -->
 	<ItemGroup>
-		<NuGetAuditSuppress Include="https://github.com/advisories/GHSA-6c8g-7p36-r338" />
+		<NuGetAuditSuppress Include="https://github.com/advisories/GHSA-6c8g-7p36-r338" /> <!-- SharpCompress WriteToDirectory -->
+		<NuGetAuditSuppress Include="https://github.com/advisories/GHSA-pggp-6c3x-2xmx" /> <!-- Snappier (transitive from MongoDB.Driver 2.x) -->
 	</ItemGroup>
 </Project>

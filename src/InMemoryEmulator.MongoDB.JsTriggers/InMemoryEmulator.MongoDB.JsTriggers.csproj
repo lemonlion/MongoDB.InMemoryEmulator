@@ -14,7 +14,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Jint" Version="4.2.1" />
+		<PackageReference Include="Jint" Version="4.10.1" />
 	</ItemGroup>
 
 	<ItemGroup>

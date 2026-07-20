@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<ItemGroup>
-		<PackageReference Include="AwesomeAssertions" Version="9.4.0" />
+		<PackageReference Include="AwesomeAssertions" Version="9.5.0" />
 		<PackageReference Include="MongoDB.Driver" Version="3.8.1" />
 		<PackageReference Include="xunit.v3.extensibility.core" Version="3.2.2" />
 	</ItemGroup>
